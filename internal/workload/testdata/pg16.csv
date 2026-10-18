@@ -1,0 +1,47 @@
+2026-10-18 23:08:48.522 IDT,,,3275,,6ad52750.ccb,1,,2026-10-18 23:08:48 IDT,,0,LOG,00000,"starting PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit",,,,,,,,,"","postmaster",,0
+2026-10-18 23:08:48.522 IDT,,,3275,,6ad52750.ccb,2,,2026-10-18 23:08:48 IDT,,0,LOG,00000,"listening on IPv4 address ""127.0.0.1"", port 5432",,,,,,,,,"","postmaster",,0
+2026-10-18 23:08:48.522 IDT,,,3275,,6ad52750.ccb,3,,2026-10-18 23:08:48 IDT,,0,LOG,00000,"listening on Unix socket ""/var/run/postgresql/.s.PGSQL.5432""",,,,,,,,,"","postmaster",,0
+2026-10-18 23:08:48.525 IDT,,,3279,,6ad52750.ccf,1,,2026-10-18 23:08:48 IDT,,0,LOG,00000,"database system was shut down at 2026-10-18 23:08:48 IDT",,,,,,,,,"","startup",,0
+2026-10-18 23:08:48.529 IDT,,,3275,,6ad52750.ccb,4,,2026-10-18 23:08:48 IDT,,0,LOG,00000,"database system is ready to accept connections",,,,,,,,,"","postmaster",,0
+2026-10-18 23:08:48.615 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,1,"SET",2026-10-18 23:08:48 IDT,3/0,0,LOG,00000,"duration: 0.095 ms  statement: SET log_min_duration_statement = 0;",,,,,,,,,"psql","client backend",,-6240129647706391794
+2026-10-18 23:08:48.638 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,2,"SELECT",2026-10-18 23:08:48 IDT,3/0,0,LOG,00000,"duration: 23.597 ms  statement: SELECT count(*) FROM exp.customers WHERE region = 5;",,,,,,,,,"psql","client backend",,-4687218944417812637
+2026-10-18 23:08:48.639 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,3,"SELECT",2026-10-18 23:08:48 IDT,3/0,0,LOG,00000,"duration: 0.556 ms  statement: SELECT id
+  FROM exp.customers
+ WHERE attrs->>'tier' = 'gold' -- a comment
+ ORDER BY created_at LIMIT 3;",,,,,,,,,"psql","client backend",,5181427191799653152
+2026-10-18 23:08:48.639 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,4,"PARSE",2026-10-18 23:08:48 IDT,3/5,0,LOG,00000,"duration: 0.109 ms  parse <unnamed>: SELECT $1::int + 1 AS a, $2::text AS b ",,,,,,,,,"psql","client backend",,-5902021026856760853
+2026-10-18 23:08:48.639 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,5,"BIND",2026-10-18 23:08:48 IDT,3/5,0,LOG,00000,"duration: 0.024 ms  bind <unnamed>: SELECT $1::int + 1 AS a, $2::text AS b ","parameters: $1 = '41', $2 = 'it''s'",,,,,,,,"psql","client backend",,-5902021026856760853
+2026-10-18 23:08:48.639 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,6,"SELECT",2026-10-18 23:08:48 IDT,3/5,0,LOG,00000,"duration: 0.004 ms  execute <unnamed>: SELECT $1::int + 1 AS a, $2::text AS b ","parameters: $1 = '41', $2 = 'it''s'",,,,,,,,"psql","client backend",,-5902021026856760853
+2026-10-18 23:08:48.639 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,7,"SELECT",2026-10-18 23:08:48 IDT,3/6,0,ERROR,22012,"division by zero",,,,,,"SELECT 1/0;",,,"psql","client backend",,-8714744942198277261
+2026-10-18 23:08:48.640 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,8,"LOAD",2026-10-18 23:08:48 IDT,3/0,0,LOG,00000,"duration: 0.786 ms  statement: LOAD 'auto_explain';",,,,,,,,,"psql","client backend",,-2816503256002287646
+2026-10-18 23:08:48.641 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,9,"SET",2026-10-18 23:08:48 IDT,3/0,0,LOG,00000,"duration: 0.018 ms  statement: SET auto_explain.log_min_duration = 0;",,,,,,,,,"psql","client backend",,-3149779336339380063
+2026-10-18 23:08:48.641 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,10,"SET",2026-10-18 23:08:48 IDT,3/0,0,LOG,00000,"duration: 0.007 ms  statement: SET auto_explain.log_parameter_max_length = -1;",,,,,,,,,"psql","client backend",,-896276519954879868
+2026-10-18 23:08:48.641 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,11,"SELECT",2026-10-18 23:08:48 IDT,3/11,0,LOG,00000,"duration: 0.028 ms  plan:
+Query Text: SELECT count(*) FROM exp.customers c
+  JOIN exp.orders o ON o.customer_id = c.id
+ WHERE c.id < 10;
+Aggregate  (cost=49.18..49.19 rows=1 width=8)
+  ->  Nested Loop  (cost=0.85..49.08 rows=38 width=0)
+        ->  Index Only Scan using customers_pkey on customers c  (cost=0.42..8.56 rows=8 width=4)
+              Index Cond: (id < 10)
+        ->  Index Only Scan using orders_customer_id_idx on orders o  (cost=0.43..5.01 rows=5 width=4)
+              Index Cond: (customer_id = c.id)",,,,,,,,,"psql","client backend",,6810613990442062796
+2026-10-18 23:08:48.642 IDT,"postgres","lqo_test",3284,"[local]",6ad52750.cd4,12,"SELECT",2026-10-18 23:08:48 IDT,3/13,0,LOG,00000,"duration: 0.025 ms  plan:
+{
+  ""Query Text"": ""SELECT region FROM exp.customers WHERE id = $1 "",
+  ""Query Parameters"": ""$1 = '7'"",
+  ""Plan"": {
+    ""Node Type"": ""Index Scan"",
+    ""Parallel Aware"": false,
+    ""Async Capable"": false,
+    ""Scan Direction"": ""Forward"",
+    ""Index Name"": ""customers_pkey"",
+    ""Relation Name"": ""customers"",
+    ""Alias"": ""customers"",
+    ""Startup Cost"": 0.42,
+    ""Total Cost"": 8.44,
+    ""Plan Rows"": 1,
+    ""Plan Width"": 4,
+    ""Index Cond"": ""(id = 7)""
+  }
+}",,,,,,,,,"psql","client backend",,-3472992703076531914

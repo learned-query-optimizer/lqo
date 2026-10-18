@@ -1,0 +1,15 @@
+# Build output
+/lqo
+/lqo.exe
+/dist/
+
+# Files lqo writes when tried in the repo
+lqo-state.json
+lqo-state.json.damaged-*
+lqo-demo.sql
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
