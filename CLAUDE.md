@@ -52,6 +52,13 @@ from the repo and its history at the owner's request (October 2026). Pages: abou
 contact, quick start, download, reference. Posts: the launch, what a learned query
 optimizer is, how LQO was tested, the name. Images are drawn into static/images.
 
+## Open item
+
+v0.1.0 was released on 19 October 2026. The Join Order Benchmark run started
+with it (ten texts per shape) was still going at release time; when its reports
+land in `test/results/job/`, add the results to the README and to the site's
+testing post.
+
 ## Next
 
 Agreed with the owner in October 2026, in this order. Each starts only when the
