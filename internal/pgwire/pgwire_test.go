@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -114,21 +115,25 @@ func TestPassFile(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "pgpass")
 	os.WriteFile(p, []byte("# comment\nother:5432:*:*:nope\ndb1:5432:shop:ann:pa\\:ss\n*:*:*:*:fallback\n"), 0o600)
-	c, err := ParseConfig("host=db1 user=ann dbname=shop passfile=" + p)
+	// Backslashes escape in connection strings, so a Windows path needs them doubled.
+	pf := strings.ReplaceAll(p, `\`, `\\`)
+	c, err := ParseConfig("host=db1 user=ann dbname=shop passfile=" + pf)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.Password != "pa:ss" {
 		t.Errorf("got %q", c.Password)
 	}
-	c, _ = ParseConfig("host=db2 user=x passfile=" + p)
+	c, _ = ParseConfig("host=db2 user=x passfile=" + pf)
 	if c.Password != "fallback" {
 		t.Errorf("wildcard: got %q", c.Password)
 	}
-	os.Chmod(p, 0o644)
-	c, _ = ParseConfig("host=db1 user=ann dbname=shop passfile=" + p)
-	if c.Password != "" {
-		t.Error("a passfile others can read must be ignored")
+	if runtime.GOOS != "windows" {
+		os.Chmod(p, 0o644)
+		c, _ = ParseConfig("host=db1 user=ann dbname=shop passfile=" + pf)
+		if c.Password != "" {
+			t.Error("a passfile others can read must be ignored")
+		}
 	}
 }
 

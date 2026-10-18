@@ -13,7 +13,9 @@ import (
 	"net/url"
 	"os"
 	"os/user"
+	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -42,7 +44,7 @@ func (c *Config) IsUnixSocket() bool { return strings.HasPrefix(c.Host, "/") }
 // Address is the network and address to dial.
 func (c *Config) Address() (network, addr string) {
 	if c.IsUnixSocket() {
-		return "unix", filepath.Join(c.Host, fmt.Sprintf(".s.PGSQL.%d", c.Port))
+		return "unix", path.Join(c.Host, fmt.Sprintf(".s.PGSQL.%d", c.Port))
 	}
 	host := c.Host
 	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
@@ -283,7 +285,12 @@ func lookupPassFile(c *Config) string {
 		path = filepath.Join(home, ".pgpass")
 	}
 	st, err := os.Stat(path)
-	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0o077 != 0 {
+	if err != nil || !st.Mode().IsRegular() {
+		return ""
+	}
+	// libpq checks the file's permissions except on Windows, which has no
+	// such bits; LQO does the same.
+	if runtime.GOOS != "windows" && st.Mode().Perm()&0o077 != 0 {
 		return ""
 	}
 	f, err := os.Open(path)

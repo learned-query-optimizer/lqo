@@ -1,0 +1,4 @@
+# Keep line endings as they are in the repository on every system, so test
+# data reads the same on Windows.
+* text=auto eol=lf
+*.png binary

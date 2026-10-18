@@ -42,8 +42,8 @@ jobs:
           go-version: "1.26.x"
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
-      - run: go test -count=1 -v ./... 2>&1 | tee test-output.txt; test "${PIPESTATUS[0]}" -eq 0
-      - run: go test -race -short -count=1 ./...
+      - run: go test -count=1 -v ./... 2>&1 | tee test-output.txt; s=${PIPESTATUS[0]}; [ "$s" -eq 0 ] || sh scripts/ci-annotate.sh test-output.txt; exit "$s"
+      - run: go test -race -short -count=1 -v ./... 2>&1 | tee race-output.txt; s=${PIPESTATUS[0]}; [ "$s" -eq 0 ] || sh scripts/ci-annotate.sh race-output.txt; exit "$s"
       - name: Smoke-test a release build against the server
         run: |
           CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o lqo ./cmd/lqo
@@ -57,17 +57,21 @@ jobs:
         with:
           go-version: "1.26.x"
       - run: go vet ./...
-      - run: go test -count=1 ./...
+      - run: go test -count=1 -v ./... 2>&1 | tee test-output.txt; s=${PIPESTATUS[0]}; [ "$s" -eq 0 ] || sh scripts/ci-annotate.sh test-output.txt; exit "$s"
+        shell: bash
       - run: |
           CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o lqo ./cmd/lqo
           sh scripts/smoke.sh ./lqo
 
   windows:
     runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version: "1.26.x"
       - run: go vet ./...
-      - run: go test -count=1 ./...
+      - run: go test -count=1 -v ./... 2>&1 | tee test-output.txt; s=${PIPESTATUS[0]}; [ "$s" -eq 0 ] || sh scripts/ci-annotate.sh test-output.txt; exit "$s"

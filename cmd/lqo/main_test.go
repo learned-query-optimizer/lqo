@@ -64,7 +64,7 @@ func TestAdviseUsageErrors(t *testing.T) {
 	if code, _, _ := runCLI("advise", "-h"); code != 0 {
 		t.Error("-h should exit 0")
 	}
-	if code, _, errOut := runCLI("advise", filepath.Join(t.TempDir(), "missing.sql")); code != exitError || !strings.Contains(errOut, "no such file") {
+	if code, _, errOut := runCLI("advise", filepath.Join(t.TempDir(), "missing.sql")); code != exitError || !strings.Contains(errOut, "missing.sql") {
 		t.Errorf("missing file: %d %s", code, errOut)
 	}
 }

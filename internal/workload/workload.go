@@ -131,7 +131,7 @@ func ReadStderrLog(name string, r io.Reader) ([]Statement, error) {
 	lineNo := 0
 	for sc.Scan() {
 		lineNo++
-		line := sc.Text()
+		line := strings.TrimSuffix(sc.Text(), "\r")
 		if strings.HasPrefix(line, "\t") && cur != nil {
 			if inDetail {
 				cur.detail += "\n" + line[1:]

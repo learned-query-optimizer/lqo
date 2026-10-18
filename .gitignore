@@ -13,3 +13,6 @@ lqo-demo.sql
 Thumbs.db
 .idea/
 .vscode/
+
+# Downloaded tools
+*.whl
