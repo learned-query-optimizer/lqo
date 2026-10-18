@@ -1,0 +1,17 @@
+# Every test with the race detector (short: no demo benchmark, fewer kills)
+# recorded 2026-10-18 20:31 UTC with go1.24.7 linux/amd64
+# Linux 6.18.44-fc-v139, Intel(R) Xeon(R) Processor @ 2.10GHz, 2 CPUs
+# server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+# command: go test -race -short -count=1 ./...
+
+?   	github.com/learned-query-optimizer/lqo	[no test files]
+ok  	github.com/learned-query-optimizer/lqo/cmd/lqo	1.255s
+ok  	github.com/learned-query-optimizer/lqo/internal/advisor	4.150s
+?   	github.com/learned-query-optimizer/lqo/internal/demo	[no test files]
+ok  	github.com/learned-query-optimizer/lqo/internal/hints	1.017s
+ok  	github.com/learned-query-optimizer/lqo/internal/pgwire	1.561s
+ok  	github.com/learned-query-optimizer/lqo/internal/plan	1.025s
+ok  	github.com/learned-query-optimizer/lqo/internal/report	1.021s
+ok  	github.com/learned-query-optimizer/lqo/internal/sqltext	1.016s
+ok  	github.com/learned-query-optimizer/lqo/internal/state	1.736s
+ok  	github.com/learned-query-optimizer/lqo/internal/workload	1.030s

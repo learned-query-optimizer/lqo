@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,7 +16,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -36,6 +36,7 @@ const usage = `lqo finds the PostgreSQL queries a planner setting makes clearly 
 Usage:
   lqo advise [flags] WORKLOAD...   try a workload's queries with each hint and report
   lqo show [flags]                 print what the state file holds
+  lqo report [flags] REPORT.json   print a saved JSON report as text or Markdown
   lqo hints [--hints full]         list the hints lqo tries
   lqo demo [flags]                 build the lqo_demo schema and its workload file
   lqo version                      print the version
@@ -72,6 +73,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = cmdAdvise(ctx, args[1:], stdout, stderr)
 	case "show":
 		err = cmdShow(args[1:], stdout, stderr)
+	case "report":
+		err = cmdReport(args[1:], stdout, stderr)
 	case "hints":
 		err = cmdHints(args[1:], stdout, stderr)
 	case "demo":
@@ -354,6 +357,28 @@ func cmdShow(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+func cmdReport(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("lqo report", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	format := fs.String("report", "text", "format: text, json or markdown")
+	files, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(files) != 1 {
+		return usageError{"give one JSON report, as written by lqo advise --report json"}
+	}
+	b, err := os.ReadFile(files[0])
+	if err != nil {
+		return err
+	}
+	var rep advisor.Report
+	if err := json.Unmarshal(b, &rep); err != nil {
+		return fmt.Errorf("%s isn't a JSON report: %w", files[0], err)
+	}
+	return report.Write(stdout, &rep, *format)
+}
+
 func cmdHints(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("lqo hints", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -409,7 +434,7 @@ func cmdDemo(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "Built the %s schema in %s.\n\nNext:\n  lqo advise --allow-primary --dsn %s %s\n",
-		demo.Schema, time.Since(start).Round(time.Second), strconv.Quote(dsnFrom(*dsn)), *wl)
+	fmt.Fprintf(stdout, "Built the %s schema in %s.\n\nNext, with the same connection string:\n  lqo advise --allow-primary --dsn ... %s\n",
+		demo.Schema, time.Since(start).Round(time.Second), *wl)
 	return nil
 }

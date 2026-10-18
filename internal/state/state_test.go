@@ -21,7 +21,7 @@ func entry(id string, gain float64) *Entry {
 	if gain > 0 {
 		v = "faster"
 	}
-	return &Entry{ID: id, Verdict: v, Gain: gain, Example: "SELECT " + id, Settings: []hints.Setting{{"enable_nestloop", "off"}}}
+	return &Entry{ID: id, Verdict: v, Gain: gain, Example: "SELECT " + id, Settings: []hints.Setting{{Name: "enable_nestloop", Value: "off"}}}
 }
 
 func TestMissingFileIsEmpty(t *testing.T) {

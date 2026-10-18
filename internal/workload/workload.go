@@ -407,7 +407,7 @@ func Group(statements []Statement) []*Shape {
 		if st.QueryID != "" && !contains(sh.QueryIDs, st.QueryID) {
 			sh.QueryIDs = append(sh.QueryIDs, st.QueryID)
 		}
-		key := strings.TrimSpace(st.Text)
+		key := sqltext.TrimLeadingComments(st.Text)
 		if i, ok := sampleIdx[id][key]; ok {
 			sh.Samples[i].Calls++
 			if st.LoggedMs > sh.Samples[i].MaxMs {

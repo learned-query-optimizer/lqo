@@ -220,8 +220,8 @@ func TestSettingsNeverLeak(t *testing.T) {
 func TestSlowerHintNeverPromoted(t *testing.T) {
 	c := setup(t)
 	harmful := []hints.Arm{
-		{Name: "no index scans at all", Settings: []hints.Setting{{"enable_indexscan", "off"}, {"enable_indexonlyscan", "off"}, {"enable_bitmapscan", "off"}}},
-		{Name: "no nested loop", Settings: []hints.Setting{{"enable_nestloop", "off"}}},
+		{Name: "no index scans at all", Settings: []hints.Setting{{Name: "enable_indexscan", Value: "off"}, {Name: "enable_indexonlyscan", Value: "off"}, {Name: "enable_bitmapscan", Value: "off"}}},
+		{Name: "no nested loop", Settings: []hints.Setting{{Name: "enable_nestloop", Value: "off"}}},
 	}
 	a, rep := newAdvisor(t, c, Options{Arms: harmful, MinTimeout: 5 * time.Millisecond, Repeat: 3})
 	sh := shapes("SELECT s.v, count(*) FROM lqo_test_adv.small s JOIN lqo_test_adv.big b ON b.small_id = s.id WHERE s.id = 77 GROUP BY s.v")
@@ -261,7 +261,7 @@ func TestDifferentRowsRuleOut(t *testing.T) {
 
 func TestQueryIDAndSessionSettings(t *testing.T) {
 	c := setup(t)
-	a, rep := newAdvisor(t, c, Options{Session: []hints.Setting{{"search_path", "lqo_test_adv"}}})
+	a, rep := newAdvisor(t, c, Options{Session: []hints.Setting{{Name: "search_path", Value: "lqo_test_adv"}}})
 	sh := shapes("SELECT count(*) FROM small WHERE v = 1", "SELECT count(*) FROM small WHERE v = 2")
 	if err := a.Run(context.Background(), sh, rep); err != nil {
 		t.Fatal(err)

@@ -1,0 +1,13 @@
+# Smoke check of a release build
+# recorded 2026-10-18 20:32 UTC with go1.24.7 linux/amd64
+# Linux 6.18.44-fc-v139, Intel(R) Xeon(R) Processor @ 2.10GHz, 2 CPUs
+# server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+# command: sh scripts/smoke.sh lqo $LQO_TEST_DSN
+
+lqo 0.1.0 (go1.24.7, linux/amd64)
+Wrote the workload to demo.sql
+Built the lqo_demo schema in 1s.
+
+Next, with the same connection string:
+  lqo advise --allow-primary --dsn ... demo.sql
+smoke test passed

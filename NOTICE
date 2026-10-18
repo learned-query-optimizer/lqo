@@ -1,0 +1,15 @@
+LQO
+Copyright lqo.net 2026
+
+This product includes software developed at lqo.net (https://lqo.net).
+
+LQO uses only the Go standard library. The lqo command and its ready-built
+binaries contain:
+  The Go runtime and standard library, Copyright 2009 The Go Authors,
+  BSD-style license
+Its notice is in THIRD_PARTY_LICENSES.md.
+
+LQO's approach, steering PostgreSQL's own planner with its planner settings
+rather than replacing it, follows published research, chiefly "Bao: Making
+Learned Query Optimization Practical" (Marcus et al., SIGMOD 2021). LQO
+contains no code from Bao or any other learned optimizer.

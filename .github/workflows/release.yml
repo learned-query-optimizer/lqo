@@ -1,0 +1,264 @@
+name: release
+
+# Builds the lqo binaries, checks each one, and publishes them with a
+# release.
+#
+# Releases go out on their own. When the tests pass on a push to main and the
+# version in lqo.go has no tag yet, this workflow builds and checks the
+# binaries from that commit, then tags it and publishes the release with the
+# binaries attached. Nothing goes public unless every build and check passes.
+#
+# It also attaches binaries to a release someone publishes by hand, and it
+# can be run by hand to rebuild the binaries of an existing tag.
+
+on:
+  workflow_run:
+    workflows: [test]
+    types: [completed]
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build, such as v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.x"
+
+jobs:
+  plan:
+    # After the tests, only for a push to main in this repository that passed.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      ref: ${{ steps.plan.outputs.ref }}
+      new: ${{ steps.plan.outputs.new }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          case "$EVENT" in
+          workflow_run)
+            # Only the commit main is at now; if main has moved on, the run
+            # after the next push decides.
+            head=$(git ls-remote origin refs/heads/main | cut -f1)
+            if [ "$head" != "$RUN_SHA" ]; then
+              echo "No release: main has moved on from $RUN_SHA to $head."
+              exit 0
+            fi
+            if grep -q '^const Version = "[0-9.]*-dev"$' lqo.go; then
+              echo "No release: lqo.go has a development version."
+              exit 0
+            fi
+            version=$(sed -n 's/^const Version = "\([0-9]*\.[0-9]*\.[0-9]*\)"$/\1/p' lqo.go)
+            if [ -z "$version" ]; then
+              echo "lqo.go has no Version of the form X.Y.Z" >&2
+              exit 1
+            fi
+            tags=$(git ls-remote --tags --refs origin) || { echo "Couldn't read the repository's tags" >&2; exit 1; }
+            if grep -q "refs/tags/v$version\$" <<< "$tags"; then
+              echo "No release: v$version is out already."
+              exit 0
+            fi
+            newest=$({ grep -o 'refs/tags/v[0-9]*\.[0-9]*\.[0-9]*$' <<< "$tags" || true; } | sed 's|refs/tags/v||' | sort -V | tail -n 1)
+            if [ -n "$newest" ] && [ "$(printf '%s\n%s\n' "$newest" "$version" | sort -V | tail -n 1)" != "$version" ]; then
+              echo "v$version is older than the newest release, v$newest; raise the version above it" >&2
+              exit 1
+            fi
+            echo "Releasing v$version from $RUN_SHA."
+            { echo "tag=v$version"; echo "ref=$RUN_SHA"; echo "new=true"; } >> "$GITHUB_OUTPUT"
+            ;;
+          release)
+            { echo "tag=$RELEASE_TAG"; echo "ref=$RELEASE_TAG"; } >> "$GITHUB_OUTPUT"
+            ;;
+          workflow_dispatch)
+            { echo "tag=$INPUT_TAG"; echo "ref=$INPUT_TAG"; } >> "$GITHUB_OUTPUT"
+            ;;
+          esac
+
+  build:
+    # lqo is pure Go with no C code, so every binary builds here.
+    needs: plan
+    if: needs.plan.outputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build and package
+        run: |
+          mkdir dist
+          for target in linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64; do
+            os=${target%/*}; arch=${target#*/}
+            exe=lqo; [ "$os" = windows ] && exe=lqo.exe
+            rm -rf pkg && mkdir pkg
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags '-s -w' -o "pkg/$exe" ./cmd/lqo
+            cp LICENSE NOTICE THIRD_PARTY_LICENSES.md README.md pkg/
+            if [ "$os" = windows ]; then
+              (cd pkg && zip -q "../dist/lqo_${os}_${arch}.zip" *)
+            else
+              tar -czf "dist/lqo_${os}_${arch}.tar.gz" -C pkg .
+            fi
+            file "pkg/$exe"
+          done
+          ls -l dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/*
+
+  check-linux-amd64:
+    # The Linux binary, against a real PostgreSQL server.
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: lqo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+      - run: |
+          mkdir bin && tar -xzf lqo_linux_amd64.tar.gz -C bin
+          sh scripts/smoke.sh bin/lqo postgres://postgres:lqo@localhost:5432/postgres?sslmode=disable
+
+  check-linux-arm64:
+    needs: [plan, build]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+      - run: mkdir bin && tar -xzf lqo_linux_arm64.tar.gz -C bin && sh scripts/smoke.sh bin/lqo
+
+  check-macos:
+    needs: [plan, build]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+      - run: |
+          mkdir arm intel
+          tar -xzf lqo_darwin_arm64.tar.gz -C arm
+          tar -xzf lqo_darwin_amd64.tar.gz -C intel
+          file intel/lqo | grep -q x86_64
+          sh scripts/smoke.sh arm/lqo
+
+  check-windows:
+    needs: [plan, build]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+      - name: Run the Windows binary
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          Expand-Archive lqo_windows_amd64.zip -DestinationPath bin
+          $lqo = Resolve-Path bin\lqo.exe
+          & $lqo version
+          $hints = & $lqo hints --hints full
+          if (@($hints).Count -ne 48) { throw "expected 48 hints" }
+          & $lqo demo --workload-only --workload demo.sql
+          if (-not (Select-String -Path demo.sql -Pattern 'lqo_demo' -Quiet)) { throw "demo workload not written" }
+          & $lqo show --state none.json
+          Write-Output "windows check passed"
+
+  release:
+    needs: [plan, build, check-linux-amd64, check-linux-arm64, check-macos, check-windows]
+    # Two runs for the same tag take turns; the second finds it published.
+    concurrency:
+      group: release-${{ needs.plan.outputs.tag }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      REF: ${{ needs.plan.outputs.ref }}
+      NEW: ${{ needs.plan.outputs.new }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - name: Checksums and notes
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+          cat > ../notes.md <<'EOF'
+          Ready-built lqo binaries. Each archive holds the `lqo` command with its license files and the README.
+
+          | System | File |
+          |---|---|
+          | Linux, x86-64 (static) | lqo_linux_amd64.tar.gz |
+          | Linux, ARM64 (static) | lqo_linux_arm64.tar.gz |
+          | macOS, Apple silicon | lqo_darwin_arm64.tar.gz |
+          | macOS, Intel | lqo_darwin_amd64.tar.gz |
+          | Windows, x86-64 | lqo_windows_amd64.zip |
+
+          SHA256SUMS lists the checksums. The macOS binaries aren't signed by Apple, so macOS may ask you to allow them the first time, or you can run `xattr -d com.apple.quarantine lqo`.
+          EOF
+      - name: Tag the commit and publish the release, binaries attached
+        if: env.NEW == 'true'
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$TAG is out already."
+            exit 0
+          fi
+          cd dist
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$REF" \
+            --title "LQO $TAG" --notes-file ../notes.md \
+            lqo_linux_amd64.tar.gz lqo_linux_arm64.tar.gz lqo_darwin_arm64.tar.gz lqo_darwin_amd64.tar.gz lqo_windows_amd64.zip SHA256SUMS
+      - name: Attach the binaries to an existing release
+        if: env.NEW != 'true'
+        run: |
+          cd dist
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber \
+            lqo_linux_amd64.tar.gz lqo_linux_arm64.tar.gz lqo_darwin_arm64.tar.gz lqo_darwin_amd64.tar.gz lqo_windows_amd64.zip SHA256SUMS
+          body=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body)
+          if [ -z "$body" ]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file ../notes.md
+          fi

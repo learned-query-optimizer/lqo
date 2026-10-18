@@ -158,3 +158,13 @@ func TestClassify(t *testing.T) {
 		}
 	}
 }
+
+func TestTrimLeadingComments(t *testing.T) {
+	got := TrimLeadingComments("-- a note\n/* another */\n  SELECT 1 -- trailing stays")
+	if got != "SELECT 1 -- trailing stays" {
+		t.Errorf("got %q", got)
+	}
+	if TrimLeadingComments("-- only") != "" {
+		t.Error("a comment alone should trim to nothing")
+	}
+}

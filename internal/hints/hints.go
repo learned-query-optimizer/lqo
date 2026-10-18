@@ -14,8 +14,8 @@ import (
 
 // Setting is one planner setting and the value to try.
 type Setting struct {
-	Name  string
-	Value string
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 // Arm is one combination of settings to try against the server's default

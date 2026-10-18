@@ -1,0 +1,73 @@
+name: test
+
+# Every push to main and every pull request: formatting, vet and the whole
+# test suite. On Linux the suite runs against real PostgreSQL 14 and 18
+# servers, including the synthetic benchmark; macOS and Windows run every
+# test that doesn't need a server. A passing run on main starts the release
+# workflow, which releases a raised version.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["14", "18"]
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: lqo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      LQO_TEST_DSN: postgres://postgres:lqo@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -count=1 -v ./... 2>&1 | tee test-output.txt; test "${PIPESTATUS[0]}" -eq 0
+      - run: go test -race -short -count=1 ./...
+      - name: Smoke-test a release build against the server
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o lqo ./cmd/lqo
+          sh scripts/smoke.sh ./lqo "$LQO_TEST_DSN"
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+      - run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o lqo ./cmd/lqo
+          sh scripts/smoke.sh ./lqo
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+      - run: go vet ./...
+      - run: go test -count=1 ./...

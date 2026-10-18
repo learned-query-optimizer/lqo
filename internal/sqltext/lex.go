@@ -315,3 +315,16 @@ func Code(sql string) []Token {
 	}
 	return out
 }
+
+// TrimLeadingComments drops comments and spaces before a statement's first
+// token, such as the notes a SQL file puts above each query.
+func TrimLeadingComments(sql string) string {
+	toks := Lex(sql)
+	i := 0
+	n := 0
+	for i < len(toks) && (toks[i].Kind == Comment || toks[i].Kind == Space) {
+		n += len(toks[i].Text)
+		i++
+	}
+	return strings.TrimSpace(sql[n:])
+}

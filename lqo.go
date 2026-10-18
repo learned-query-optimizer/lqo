@@ -13,4 +13,4 @@
 package lqo
 
 // Version is the LQO release. The release workflow reads it from this line.
-const Version = "0.1.0"
+const Version = "0.1.0-dev"
