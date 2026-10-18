@@ -1,0 +1,8 @@
+# Join Order Benchmark run
+recorded 2026-10-18 23:04 UTC, lqo advise took 75 minutes
+machine: Linux 6.17.0-1022-azure, AMD EPYC 7763 64-Core Processor, 4 CPUs, 15 GB memory
+server: PostgreSQL 16.15 (Ubuntu 16.15-1.pgdg24.04+2) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+settings: effective_cache_size=13107208kB, jit=on, max_parallel_workers_per_gather=2, random_page_cost=4, shared_buffers=5242888kB, work_mem=65536kB
+queries: github.com/gregrahn/join-order-benchmark at a39603662e023e449cb2121997a5034df9e02ebf
+data: https://event.cwi.nl/da/job/imdb.tgz
+command: lqo advise --allow-primary --top 113 --repeat 3 --samples 10 --max-time 120s
