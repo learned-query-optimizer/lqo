@@ -3,11 +3,11 @@
 - **Server:** PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1), database lqo_test (primary, allowed with --allow-primary)
 - **Workload:** lqo-demo.sql (sql): 8 statements, 6 shapes
 - **Settings:** standard hints (13), 3 timed runs after a warm-up, up to 3 samples per shape, a hint must save 20%
-- **Estimate:** one pass of the tested statements takes 2,315 ms now, 1,461 ms with these hints (−37%)
+- **Estimate:** one pass of the tested statements takes 2,218 ms now, 1,453 ms with these hints (−34%)
 
 ## Faster with a hint (2 of 5 tested)
 
-### `891f0819` 1,109 ms → 687 ms (−38%)
+### `891f0819` 1,061 ms → 684 ms (−36%)
 
 ```sql
 SELECT sum(l.qty)
@@ -24,7 +24,7 @@ SELECT sum(l.qty)
 SET LOCAL enable_nestloop = off;
 ```
 
-### `6c73a7a6` 36.4 ms → 26.3 ms (−28%)
+### `6c73a7a6` 35.1 ms → 24.7 ms (−30%)
 
 ```sql
 SELECT id, created_at
@@ -46,9 +46,9 @@ SET LOCAL enable_indexonlyscan = off;
 
 | Shape | Query | Time | Why |
 |---|---|---|---|
-| `24eb83c2` | SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' =… | 17.8 ms | no other plan was clearly faster |
-| `5fcb12e3` | SELECT c.id, count(*), sum(l.qty) FROM lqo_demo.customers c… | 0.33 ms | no other plan was clearly faster |
-| `b690ee77` | SELECT region, count(*) FROM lqo_demo.customers GROUP BY re… | 25.0 ms | no other plan was clearly faster |
+| `24eb83c2` | SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' =… | 17.5 ms | no other plan was clearly faster |
+| `5fcb12e3` | SELECT c.id, count(*), sum(l.qty) FROM lqo_demo.customers c… | 0.21 ms | no other plan was clearly faster |
+| `b690ee77` | SELECT region, count(*) FROM lqo_demo.customers GROUP BY re… | 25.5 ms | no other plan was clearly faster |
 
 ## Not tested (1)
 

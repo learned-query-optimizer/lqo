@@ -408,19 +408,65 @@ func parseError(msg []byte) *PgError {
 //
 // When ctx ends first, Exec asks the server to cancel the statement and waits
 // a few seconds for it to stop; if it doesn't, the connection is closed.
+//
+// Exec sends sql as it is, so only use it for SQL LQO wrote itself. For a
+// statement from a workload, use ExecOne.
 func (c *Conn) Exec(ctx context.Context, sql string) ([]Result, error) {
+	msg := make([]byte, 5, 6+len(sql))
+	msg[0] = 'Q'
+	msg = append(msg, sql...)
+	msg = append(msg, 0)
+	binary.BigEndian.PutUint32(msg[1:], uint32(len(msg)-1))
+	return c.roundTrip(ctx, msg)
+}
+
+// ExecOne runs exactly one statement through the extended query protocol
+// (Parse, Bind, Describe, Execute, Sync). The server refuses a string that
+// holds more than one statement there, so whatever the text contains, at
+// most one statement runs.
+func (c *Conn) ExecOne(ctx context.Context, sql string) ([]Result, error) {
+	if strings.IndexByte(sql, 0) >= 0 {
+		return nil, errors.New("the statement contains a zero byte")
+	}
+	var msg []byte
+	add := func(typ byte, body []byte) {
+		msg = append(msg, typ)
+		msg = binary.BigEndian.AppendUint32(msg, uint32(len(body)+4))
+		msg = append(msg, body...)
+	}
+	// Parse: unnamed statement, the text, no parameter types.
+	var p []byte
+	p = append(p, 0)
+	p = append(p, sql...)
+	p = append(p, 0, 0, 0)
+	add('P', p)
+	// Bind: unnamed portal and statement, no parameters, text results.
+	add('B', []byte{0, 0, 0, 0, 0, 0, 0, 0})
+	add('D', []byte{'P', 0})
+	add('E', []byte{0, 0, 0, 0, 0})
+	add('S', nil)
+	return c.roundTrip(ctx, msg)
+}
+
+// roundTrip sends msg and reads the reply up to ReadyForQuery.
+func (c *Conn) roundTrip(ctx context.Context, msg []byte) ([]Result, error) {
 	if c.broken {
 		return nil, errors.New("the connection is broken")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	msg := make([]byte, 5, 6+len(sql))
-	msg[0] = 'Q'
-	msg = append(msg, sql...)
-	msg = append(msg, 0)
-	binary.BigEndian.PutUint32(msg[1:], uint32(len(msg)-1))
 
+	// The watcher cancels the statement if ctx ends while it runs. It only
+	// sends a cancel request while the reply is still being read, so a
+	// cancel can't be aimed at a statement that has already finished.
+	var mu sync.Mutex
+	finished := false
+	finish := func() {
+		mu.Lock()
+		finished = true
+		mu.Unlock()
+	}
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -431,14 +477,25 @@ func (c *Conn) Exec(ctx context.Context, sql string) ([]Result, error) {
 			return
 		case <-ctx.Done():
 		}
+		mu.Lock()
+		if finished {
+			mu.Unlock()
+			return
+		}
+		mu.Unlock()
 		c.cancelRequest()
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
-			c.netConn.SetDeadline(time.Unix(1, 0))
+			mu.Lock()
+			if !finished {
+				c.netConn.SetDeadline(time.Unix(1, 0))
+			}
+			mu.Unlock()
 		}
 	}()
 	defer func() {
+		finish()
 		close(done)
 		wg.Wait()
 	}()
@@ -480,6 +537,8 @@ func (c *Conn) Exec(ctx context.Context, sql string) ([]Result, error) {
 			cur = nil
 		case 'I':
 			cur = nil
+		case '1', '2', 'n', 's', '3':
+			// ParseComplete, BindComplete, NoData, PortalSuspended, CloseComplete
 		case 'E':
 			if firstErr == nil {
 				firstErr = parseError(body)
@@ -503,9 +562,13 @@ func (c *Conn) Exec(ctx context.Context, sql string) ([]Result, error) {
 		case 'H', 'd', 'c', 'W':
 			// COPY TO STDOUT: read and drop the data.
 		case 'Z':
+			finish()
 			if len(body) > 0 {
 				c.txStatus = body[0]
 			}
+			// Clear any deadline the watcher set, so the next query isn't
+			// cut short.
+			c.netConn.SetDeadline(time.Time{})
 			if firstErr != nil {
 				return results, firstErr
 			}

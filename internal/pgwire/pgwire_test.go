@@ -281,3 +281,36 @@ func TestConnectRefused(t *testing.T) {
 		t.Error("connecting to port 1 should fail")
 	}
 }
+
+func TestExecOneRunsOneStatement(t *testing.T) {
+	c := testConn(t)
+	ctx := context.Background()
+	res, err := c.ExecOne(ctx, "SELECT 1 AS a")
+	if err != nil || len(res) != 1 || *res[0].Rows[0][0] != "1" {
+		t.Fatalf("ExecOne: %v %+v", err, res)
+	}
+	// The extended protocol takes one statement only; the server refuses
+	// a second one rather than running it.
+	if _, err := c.ExecOne(ctx, "SELECT 1; CREATE TEMP TABLE lqo_never(x int)"); err == nil {
+		t.Fatal("two statements were accepted")
+	}
+	if _, err := c.ExecOne(ctx, "SELECT 1\x00; SELECT 2"); err == nil {
+		t.Fatal("a zero byte was accepted")
+	}
+	if v, err := c.QueryValue(ctx, "SELECT count(*) FROM pg_class WHERE relname = 'lqo_never'"); err != nil || v != "0" {
+		t.Errorf("the second statement ran: %v %q", err, v)
+	}
+}
+
+func TestParseURLSocketHost(t *testing.T) {
+	c, err := ParseConfig("postgres://app:pw@%2Fvar%2Frun%2Fpostgresql:5433/shop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Host != "/var/run/postgresql" || c.Port != 5433 || c.User != "app" || c.Password != "pw" || c.Database != "shop" {
+		t.Errorf("got %+v", c)
+	}
+	if n, a := c.Address(); n != "unix" || a != "/var/run/postgresql/.s.PGSQL.5433" {
+		t.Errorf("address %s %s", n, a)
+	}
+}

@@ -250,12 +250,30 @@ func TestSlowerHintNeverPromoted(t *testing.T) {
 func TestDifferentRowsRuleOut(t *testing.T) {
 	c := setup(t)
 	a, rep := newAdvisor(t, c, Options{Repeat: 2})
-	sh := shapes("SELECT count(*) FROM lqo_test_adv.small s JOIN lqo_test_adv.big b ON b.small_id = s.id WHERE random() < 0.5")
+	// The rows this returns change on every run, so no plan can be
+	// compared with the default one.
+	sh := shapes("SELECT s.id FROM lqo_test_adv.small s JOIN lqo_test_adv.big b ON b.small_id = s.id WHERE random() < 0.5")
 	if err := a.Run(context.Background(), sh, rep); err != nil {
 		t.Fatal(err)
 	}
-	if rep.Shapes[0].Verdict == Faster {
-		t.Errorf("a hint was suggested for a query whose rows change: %+v", rep.Shapes[0].Best)
+	s := rep.Shapes[0]
+	if s.Verdict == Faster {
+		t.Errorf("a hint was suggested for a query whose rows change: %+v", s.Best)
+	}
+	if !strings.Contains(s.Reason, "different number of rows") {
+		t.Errorf("reason %q doesn't say the rows changed", s.Reason)
+	}
+}
+
+func TestQuotedLockIsSkipped(t *testing.T) {
+	c := setup(t)
+	a, rep := newAdvisor(t, c, Options{})
+	sh := shapes(`SELECT "pg_advisory_lock"(42)`)
+	if err := a.Run(context.Background(), sh, rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Shapes[0].Verdict != Skipped {
+		t.Errorf("verdict %s, want skipped", rep.Shapes[0].Verdict)
 	}
 }
 

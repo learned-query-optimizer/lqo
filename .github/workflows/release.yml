@@ -115,9 +115,9 @@ jobs:
             CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags '-s -w' -o "pkg/$exe" ./cmd/lqo
             cp LICENSE NOTICE THIRD_PARTY_LICENSES.md README.md pkg/
             if [ "$os" = windows ]; then
-              (cd pkg && zip -q "../dist/lqo_${os}_${arch}.zip" *)
+              (cd pkg && zip -q "../dist/lqo_${os}_${arch}.zip" "$exe" LICENSE NOTICE THIRD_PARTY_LICENSES.md README.md)
             else
-              tar -czf "dist/lqo_${os}_${arch}.tar.gz" -C pkg .
+              tar -czf "dist/lqo_${os}_${arch}.tar.gz" -C pkg "$exe" LICENSE NOTICE THIRD_PARTY_LICENSES.md README.md
             fi
             file "pkg/$exe"
           done

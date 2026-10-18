@@ -267,6 +267,14 @@ func New(ctx context.Context, conn *pgwire.Conn, opt Options, rep *Report) (*Adv
 			return nil, fmt.Errorf("setting %s: %w", s.Name, err)
 		}
 	}
+	// With standard_conforming_strings off, a backslash escapes a quote
+	// inside '...', and LQO's reading of statements would differ from the
+	// server's. Every supported version has it on by default.
+	if v, err := conn.QueryValue(ctx, "SHOW standard_conforming_strings"); err != nil {
+		return nil, err
+	} else if v != "on" {
+		return nil, errors.New("standard_conforming_strings is off on this connection; LQO runs only with it on, the default since PostgreSQL 9.1")
+	}
 	// Query IDs, where the server allows it. Ignore a refusal.
 	if rep.ServerNum >= 140000 {
 		conn.Exec(ctx, "SET compute_query_id = on")
@@ -317,6 +325,17 @@ func (a *Advisor) checkNoLeak(ctx context.Context) error {
 	if a.conn.TxStatus() != 'I' {
 		return errors.New("a trial transaction was left open; stopping")
 	}
+	// A session-level advisory lock outlives a rolled-back transaction. The
+	// statement check blocks the functions that take one, but a function in
+	// the workload could still call them; if it did, stop, and closing the
+	// connection releases the lock.
+	n, err := a.conn.QueryValue(ctx, "SELECT count(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'advisory'")
+	if err != nil {
+		return err
+	}
+	if n != "0" {
+		return errors.New("a trial left an advisory lock held; stopping, which releases it")
+	}
 	return nil
 }
 
@@ -324,8 +343,18 @@ func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'
 
 var errTimeout = errors.New("timed out")
 
+// ErrUnsafe means a trial didn't stay inside its own transaction. LQO stops
+// the whole run when it sees this; it should never happen.
+var ErrUnsafe = errors.New("a trial left its READ ONLY transaction; LQO stopped to be safe")
+
 // trial runs one EXPLAIN in a READ ONLY transaction with the arm's settings
 // and rolls it back. A nil arm means the server's default plan.
+//
+// The BEGIN and the SET LOCAL lines are LQO's own text and go through the
+// simple query protocol. The EXPLAIN with the workload's statement goes
+// through the extended protocol, which runs one statement and no more, so
+// nothing in the statement's text can end the transaction or run a second
+// statement.
 func (a *Advisor) trial(ctx context.Context, sql string, arm *hints.Arm, mode string, timeout time.Duration) (*plan.Explain, error) {
 	var b strings.Builder
 	b.WriteString("BEGIN TRANSACTION READ ONLY;")
@@ -341,6 +370,9 @@ func (a *Advisor) trial(ctx context.Context, sql string, arm *hints.Arm, mode st
 		return nil, err
 	}
 	defer a.rollback()
+	if a.conn.TxStatus() != 'T' {
+		return nil, ErrUnsafe
+	}
 	var explain string
 	switch mode {
 	case "analyze":
@@ -353,7 +385,12 @@ func (a *Advisor) trial(ctx context.Context, sql string, arm *hints.Arm, mode st
 	// A client-side deadline as a backstop to statement_timeout.
 	tctx, cancel := context.WithTimeout(ctx, timeout+10*time.Second)
 	defer cancel()
-	res, err := a.conn.Exec(tctx, explain+sql)
+	res, err := a.conn.ExecOne(tctx, explain+sql)
+	// Whatever happened, the transaction must still be open: in progress
+	// after success, failed after an error. Idle would mean it ended.
+	if st := a.conn.TxStatus(); !a.conn.Broken() && st != 'T' && st != 'E' {
+		return nil, ErrUnsafe
+	}
 	if err != nil {
 		if pgwire.IsCode(err, pgwire.CodeQueryCanceled) {
 			if ctx.Err() != nil {
@@ -363,10 +400,11 @@ func (a *Advisor) trial(ctx context.Context, sql string, arm *hints.Arm, mode st
 		}
 		return nil, err
 	}
-	for _, r := range res {
-		if len(r.Rows) > 0 && r.Rows[0][0] != nil {
-			return plan.Parse(*r.Rows[0][0])
-		}
+	if len(res) != 1 {
+		return nil, ErrUnsafe
+	}
+	if len(res[0].Rows) > 0 && res[0].Rows[0][0] != nil {
+		return plan.Parse(*res[0].Rows[0][0])
 	}
 	return nil, errors.New("EXPLAIN returned no rows")
 }
@@ -493,6 +531,9 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 	ok := make([]bool, n)
 	strictWin := make([]bool, n)
 	helped := make([]bool, n)
+	slower := make([]bool, n)
+	laterFailed := ""
+	rowsVary := false
 	for i := range ok {
 		ok[i] = true
 	}
@@ -504,7 +545,6 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 		if err != nil {
 			return err
 		}
-		r.Samples = append(r.Samples, sr)
 		if sr.Error != "" {
 			if si == 0 {
 				r.Verdict, r.Reason = Failed, sr.Error
@@ -513,15 +553,26 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 				}
 				return nil
 			}
-			// A later sample failed: don't trust any hint for this shape.
+			// A later text failed: don't trust any hint for this shape. The
+			// failed text isn't counted in the shape's times.
 			for i := range ok {
 				ok[i] = false
 			}
-			r.Notes = append(r.Notes, "a sample failed to run: "+sr.Error)
+			if laterFailed == "" {
+				laterFailed = sr.Error
+			}
+			r.Notes = append(r.Notes, "a text failed to run: "+sr.Error)
 			continue
 		}
-		if len(groups) > maxPlans {
-			maxPlans = len(groups)
+		r.Samples = append(r.Samples, sr)
+		distinct := 0
+		for _, g := range groups {
+			if g.err == "" {
+				distinct++
+			}
+		}
+		if distinct > maxPlans {
+			maxPlans = distinct
 		}
 		base := groups[0]
 		if firstBase == nil {
@@ -530,6 +581,14 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 		bMed := median(base.runs)
 		bMin := minOf(base.runs)
 		sumBase += bMed
+		if !allEqual(base.rows) {
+			// The default plan's own answer changed between runs, so no
+			// plan can be compared with it.
+			rowsVary = true
+			for i := range ok {
+				ok[i] = false
+			}
+		}
 		byArm := make([]*planGroup, n)
 		for _, g := range groups {
 			for _, ai := range g.arms {
@@ -542,6 +601,9 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 			g := byArm[i]
 			if g == nil || g.err != "" || g.timedOut || len(g.runs) == 0 {
 				ok[i] = false
+				if g != nil && g.timedOut {
+					slower[i] = true
+				}
 				continue
 			}
 			if armRoot[i] == nil {
@@ -549,13 +611,17 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 			}
 			m := median(g.runs)
 			sumArm[i] += m
-			if !sameRows(g.rows, base.rows) {
+			if g.timedOut {
+				slower[i] = true
+			}
+			if !rowsVary && !sameRows(g.rows, base.rows) {
 				ok[i] = false
 				r.Notes = appendOnce(r.Notes, fmt.Sprintf("%q returned a different number of rows; it was ruled out", a.opt.Arms[i].Name))
 				continue
 			}
 			if m > bMed*(1+a.opt.Tolerance) {
 				ok[i] = false
+				slower[i] = true
 			}
 			if g != base && maxOf(g.runs) < bMin && m <= bMed*(1-a.opt.MinGain) {
 				strictWin[i] = true
@@ -573,8 +639,7 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 		if sumArm[i] > sumBase*(1-a.opt.MinGain) {
 			continue
 		}
-		if best < 0 || sumArm[i] < sumArm[best]*0.98 ||
-			(sumArm[i] <= sumArm[best]*1.02 && len(a.opt.Arms[i].Settings) < len(a.opt.Arms[best].Settings)) {
+		if best < 0 || a.better(i, best, sumArm) {
 			best = i
 		}
 	}
@@ -582,11 +647,15 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 		r.Verdict = Keep
 		mixed := false
 		for i := 0; i < n; i++ {
-			if helped[i] && !ok[i] {
+			if helped[i] && slower[i] {
 				mixed = true
 			}
 		}
 		switch {
+		case rowsVary:
+			r.Reason = "the query returned a different number of rows on different runs, so no plan could be compared"
+		case laterFailed != "":
+			r.Reason = "a later text failed to run: " + laterFailed
 		case mixed:
 			r.Reason = "a hint helped one sample but was slower on another"
 		case maxPlans <= 1:
@@ -630,8 +699,8 @@ func (a *Advisor) sample(ctx context.Context, text string, wantQueryID bool, r *
 	planTimeout := a.opt.MaxTime
 	baseExp, err := a.trial(ctx, text, nil, "plan", planTimeout)
 	if err != nil {
-		if ctx.Err() != nil {
-			return sr, nil, ctx.Err()
+		if ctx.Err() != nil || errors.Is(err, ErrUnsafe) {
+			return sr, nil, err
 		}
 		sr.Error = errText(err)
 		return sr, nil, nil
@@ -641,8 +710,8 @@ func (a *Advisor) sample(ctx context.Context, text string, wantQueryID bool, r *
 			if q := v.QueryID.String(); q != "" && q != "0" {
 				r.QueryID = q
 			}
-		} else if ctx.Err() != nil {
-			return sr, nil, ctx.Err()
+		} else if ctx.Err() != nil || errors.Is(err, ErrUnsafe) {
+			return sr, nil, err
 		}
 	}
 	base := &planGroup{fp: plan.Fingerprint(baseExp.Plan), root: baseExp.Plan, arms: []int{-1}}
@@ -651,8 +720,8 @@ func (a *Advisor) sample(ctx context.Context, text string, wantQueryID bool, r *
 	for i := range a.opt.Arms {
 		e, err := a.trial(ctx, text, &a.opt.Arms[i], "plan", planTimeout)
 		if err != nil {
-			if ctx.Err() != nil {
-				return sr, nil, ctx.Err()
+			if ctx.Err() != nil || errors.Is(err, ErrUnsafe) {
+				return sr, nil, err
 			}
 			g := &planGroup{fp: "error", arms: []int{i}, err: errText(err)}
 			groups = append(groups, g)
@@ -764,8 +833,8 @@ func (a *Advisor) run(ctx context.Context, text string, g *planGroup, limit time
 	}
 	e, err := a.trial(ctx, text, arm, "analyze", limit)
 	if err != nil {
-		if ctx.Err() != nil {
-			return 0, ctx.Err()
+		if ctx.Err() != nil || errors.Is(err, ErrUnsafe) {
+			return 0, err
 		}
 		if errors.Is(err, errTimeout) {
 			g.timedOut = true
@@ -827,11 +896,39 @@ func maxOf(v []float64) float64 {
 	return m
 }
 
+// sameRows reports whether every run of both plans returned the same
+// number of rows.
 func sameRows(a, b []float64) bool {
-	if len(a) == 0 || len(b) == 0 {
+	if len(a) == 0 || len(b) == 0 || !allEqual(a) || !allEqual(b) {
 		return false
 	}
 	return a[0] == b[0]
+}
+
+func allEqual(v []float64) bool {
+	for _, x := range v {
+		if x != v[0] {
+			return false
+		}
+	}
+	return true
+}
+
+// better reports whether arm i should replace arm j as the suggestion.
+// Clearly faster wins (by more than 2%); within 2%, the arm that changes
+// fewer settings wins, and with the same number, the faster one.
+func (a *Advisor) better(i, j int, sum []float64) bool {
+	if sum[i] < sum[j]*0.98 {
+		return true
+	}
+	if sum[j] < sum[i]*0.98 {
+		return false
+	}
+	ni, nj := len(a.opt.Arms[i].Settings), len(a.opt.Arms[j].Settings)
+	if ni != nj {
+		return ni < nj
+	}
+	return sum[i] < sum[j]
 }
 
 func appendOnce(list []string, s string) []string {

@@ -49,7 +49,8 @@ func Lex(sql string) []Token {
 			}
 			out = append(out, Token{Space, sql[start:i]})
 		case c == '-' && i+1 < n && sql[i+1] == '-':
-			for i < n && sql[i] != '\n' {
+			// PostgreSQL ends a line comment at a newline or a carriage return.
+			for i < n && sql[i] != '\n' && sql[i] != '\r' {
 				i++
 			}
 			out = append(out, Token{Comment, sql[start:i]})

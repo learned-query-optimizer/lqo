@@ -170,6 +170,26 @@ var denied = map[string]bool{
 	"pg_export_snapshot": true, "pg_create_logical_replication_slot": true,
 	"pg_create_physical_replication_slot": true, "pg_drop_replication_slot": true,
 	"pg_file_write": true, "pg_file_unlink": true, "pg_file_rename": true,
+	"pg_logical_slot_get_changes": true, "pg_logical_slot_get_binary_changes": true,
+	"pg_logical_slot_peek_changes": true, "pg_logical_slot_peek_binary_changes": true,
+	"pg_replication_slot_advance": true, "pg_copy_physical_replication_slot": true,
+	"pg_copy_logical_replication_slot": true, "pg_backup_start": true, "pg_backup_stop": true,
+	"pg_start_backup": true, "pg_stop_backup": true,
+	// These run SQL given to them as a string, which LQO can't check.
+	"query_to_xml": true, "query_to_xmlschema": true, "query_to_xml_and_xmlschema": true,
+	"cursor_to_xml": true, "cursor_to_xmlschema": true,
+}
+
+// deniedCall reports a call to a denied function: name followed by "(".
+func deniedCall(name string, code []Token, i int) string {
+	if i+1 >= len(code) || code[i+1].Kind != Op || code[i+1].Text != "(" {
+		return ""
+	}
+	n := strings.ToLower(name)
+	if denied[n] || strings.HasPrefix(n, "dblink") || strings.HasPrefix(n, "lo_") {
+		return fmt.Sprintf("it calls %s(), which acts outside the query", n)
+	}
+	return ""
 }
 
 // Classify decides whether LQO may run a statement. It returns "" when the
@@ -214,10 +234,21 @@ func Classify(sql string) string {
 					return "it locks rows (FOR UPDATE or FOR SHARE)"
 				}
 			}
-			if i+1 < len(code) && code[i+1].Kind == Op && code[i+1].Text == "(" {
-				if denied[w] || strings.HasPrefix(w, "dblink") || strings.HasPrefix(w, "lo_") {
-					return fmt.Sprintf("it calls %s(), which acts outside the query", w)
+			if r := deniedCall(w, code, i); r != "" {
+				return r
+			}
+		case Ident:
+			// A quoted name calls the same function: "pg_sleep"(1).
+			name := t.Text
+			if strings.HasPrefix(name, "U&") || strings.HasPrefix(name, "u&") {
+				if i+1 < len(code) && code[i+1].Kind == Op && code[i+1].Text == "(" {
+					return "it calls a function by a Unicode-escaped name, which LQO can't check"
 				}
+				continue
+			}
+			name = strings.ReplaceAll(strings.Trim(name, `"`), `""`, `"`)
+			if r := deniedCall(name, code, i); r != "" {
+				return r
 			}
 		}
 	}

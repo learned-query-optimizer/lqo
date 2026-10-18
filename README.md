@@ -83,12 +83,12 @@ a report like this one, from the recorded run in
 Faster with a hint: 2 of 5 tested
 
   1. 891f0819  SELECT sum(l.qty) FROM lqo_demo.customers c JOIN lqo_demo.order…  (2 calls)
-     1,109 ms → 687 ms (−38%) with "no nested loop"
+     1,061 ms → 684 ms (−36%) with "no nested loop"
      Plan: Nested Loop ×2, Bitmap Heap Scan on orders, Index Scan on order_lines → Hash Join ×2, Seq Scan on order_lines, Seq Scan on orders
        SET LOCAL enable_nestloop = off;
 
   2. 6c73a7a6  SELECT id, created_at FROM lqo_demo.customers WHERE attrs->>'ti…  (1 call)
-     36.4 ms → 26.3 ms (−28%) with "no index scan"
+     35.1 ms → 24.7 ms (−30%) with "no index scan"
      Plan: Index Scan on customers → Seq Scan on customers
        SET LOCAL enable_indexscan = off;
        SET LOCAL enable_indexonlyscan = off;
@@ -98,8 +98,8 @@ The second one is a borderline case: on some runs its timings overlap and LQO
 keeps the default plan instead. That's the rule working as meant.
 
 The demo's workload file explains each query and why LQO should or shouldn't touch
-it. One of them is a query where a setting helps for one value and hurts for
-another, and LQO leaves it alone.
+it. One of them is a query where switching off index scans would make one of its
+values hundreds of times slower, and LQO leaves it alone.
 
 ## Use it on your database
 
@@ -112,8 +112,9 @@ a staging copy with production-like data. By default `lqo advise` checks
 a test server, add `--allow-primary`.
 
 Every trial is read-only and rolled back (see
-[What LQO will and won't run](#what-lqo-will-and-wont-run)), so a primary's data is
-never at risk. The cost on a primary is load: the queries really run.
+[What LQO will and won't run](#what-lqo-will-and-wont-run)), so LQO itself changes
+nothing. The cost on a primary is load: the queries really run, and so does any
+function they call. Use a copy if that worries you.
 
 On a replica, long trials can be cancelled by replication conflicts. If that
 happens often, `hot_standby_feedback = on` or a larger `max_standby_streaming_delay`
@@ -235,14 +236,14 @@ For each shape, and each of its sampled texts, LQO:
 
 A hint is suggested for the shape only when, for every sampled text:
 
-- it returned the same number of rows as the default plan,
+- every run returned the same number of rows as every run of the default plan,
 - it never hit the time limit,
 - its median time was no more than 10% above the default plan's,
 
 and on at least one text its slowest run beat the default plan's fastest run, and
 over all the texts it saved at least `--min-gain` (20%) of the time. If several
-hints pass, the fastest wins; within 2% of each other, the one that changes fewer
-settings.
+hints pass, the fastest wins; when two are within 2% of each other, the one that
+changes fewer settings wins, and if they change as many, the faster.
 
 It's deliberately strict. A missed suggestion costs nothing; a wrong one would slow
 down a query in production. The rule is the same for every shape, and the JSON
@@ -277,6 +278,13 @@ or `COPY`, isn't `SELECT ... INTO` or `FOR UPDATE`/`FOR SHARE`, and calls none o
 functions that act outside a query, such as `pg_sleep`, `set_config`,
 `pg_terminate_backend`, advisory locks, `nextval`, `dblink` or large objects.
 Everything else is listed as skipped, with the reason.
+
+That check reads the SQL text, so it can't see inside functions you wrote
+yourself: a query that calls one runs it, and whatever the function does inside a
+read-only transaction happens. LQO sends each trial's query as a single statement
+that the server won't split, refuses a server whose `standard_conforming_strings`
+is off, and after every shape checks that no setting and no advisory lock is left
+behind. For the most care, connect as a role that can only read.
 
 Then every trial runs like this, and is rolled back:
 
@@ -369,9 +377,9 @@ when the writing process is killed 40 times; and the demo benchmark, where LQO m
 find the trap and leave the other shapes alone.
 
 `sh scripts/record-tests.sh` runs them all and writes the output to
-[test/results/](test/results/). The Join Order Benchmark, 113 queries over the IMDB
-data set, runs in the [job workflow](.github/workflows/job.yml) on a GitHub runner
-and records its reports in `test/results/job/`.
+[test/results/](test/results/). The Join Order Benchmark, 113 queries in 94 shapes
+over the IMDB data set, runs in the [job workflow](.github/workflows/job.yml) on a
+GitHub runner and records its reports in `test/results/job/`.
 
 CI runs every push on Linux against PostgreSQL 14 and 18, and on macOS and Windows.
 Releases are automated: see [RELEASING.md](RELEASING.md).

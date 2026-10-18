@@ -61,6 +61,18 @@ func TestAdviseUsageErrors(t *testing.T) {
 	if code, _, _ := runCLI("advise", "--min-gain", "150", "x.sql"); code != exitRefused {
 		t.Error("bad gain accepted")
 	}
+	if code, _, _ := runCLI("advise", "--no-such-flag", "x.sql"); code != exitRefused {
+		t.Error("unknown flag should exit 2")
+	}
+	if code, _, _ := runCLI("advise", "--repeat", "many", "x.sql"); code != exitRefused {
+		t.Error("bad flag value should exit 2")
+	}
+	if code, _, _ := runCLI("advise", "--hints", "most", "x.sql"); code != exitRefused {
+		t.Error("unknown hint set accepted")
+	}
+	if code, _, _ := runCLI("advise", "--format", "xml", "x.sql"); code != exitRefused {
+		t.Error("unknown workload format accepted")
+	}
 	if code, _, _ := runCLI("advise", "-h"); code != 0 {
 		t.Error("-h should exit 0")
 	}

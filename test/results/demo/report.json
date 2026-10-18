@@ -1,7 +1,7 @@
 {
-  "lqo_version": "0.1.0",
-  "started": "2026-10-18T20:32:25.769828779Z",
-  "finished": "2026-10-18T20:33:47.795835832Z",
+  "lqo_version": "0.1.0-dev",
+  "started": "2026-10-18T21:41:23.517032047Z",
+  "finished": "2026-10-18T21:42:42.638938869Z",
   "server": "PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit",
   "server_version_num": 160015,
   "database": "lqo_test",
@@ -22,12 +22,12 @@
   "shapes": [
     {
       "id": "891f0819ce6bf4ec",
-      "query_id": "5371397520282285713",
+      "query_id": "-5102352612406911896",
       "normalized": "select sum ( l . qty ) from lqo_demo . customers c join lqo_demo . orders o on o . customer_id = c . id join lqo_demo . order_lines l on l . order_id = o . id where c . attrs ->> ? = ? and c . attrs ->> ? = ?",
       "calls": 2,
       "example": "SELECT sum(l.qty)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n WHERE c.attrs->>'tier' = 'gold' AND c.attrs->>'channel' = 'partner'",
       "verdict": "faster",
-      "baseline_ms": 2217.506,
+      "baseline_ms": 2121.809,
       "best": {
         "name": "no nested loop",
         "settings": [
@@ -39,8 +39,8 @@
         "set_local": [
           "SET LOCAL enable_nestloop = off;"
         ],
-        "ms": 1373.564,
-        "gain": 0.38058160834739563,
+        "ms": 1367.344,
+        "gain": 0.3555763030508401,
         "plan_change": "Nested Loop ×2, Bitmap Heap Scan on orders, Index Scan on order_lines → Hash Join ×2, Seq Scan on order_lines, Seq Scan on orders",
         "same_plan_as": [
           "hash join only"
@@ -50,11 +50,11 @@
       "samples": [
         {
           "text": "SELECT sum(l.qty)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n WHERE c.attrs->>'tier' = 'gold' AND c.attrs->>'channel' = 'partner'",
-          "baseline_ms": 625.1229999999999,
+          "baseline_ms": 574.3679999999999,
           "baseline_runs": [
-            739.375,
-            610.668,
-            625.1229999999999
+            574.3679999999999,
+            590.491,
+            541.3839999999999
           ],
           "rows": 1,
           "baseline_plan": [
@@ -68,11 +68,11 @@
             {
               "name": "hash join only",
               "plan": "a8796c493852fe72",
-              "ms": 552.61,
+              "ms": 473.81100000000004,
               "runs": [
-                575.9340000000001,
-                517.958,
-                552.61
+                545.945,
+                473.81100000000004,
+                432.28400000000005
               ],
               "rows": 1
             },
@@ -80,22 +80,22 @@
               "name": "join order as written",
               "plan": "d01a441fa635ebcd",
               "same_plan_as_default": true,
-              "ms": 625.1229999999999,
+              "ms": 574.3679999999999,
               "runs": [
-                739.375,
-                610.668,
-                625.1229999999999
+                574.3679999999999,
+                590.491,
+                541.3839999999999
               ],
               "rows": 1
             },
             {
               "name": "merge join only",
               "plan": "375465ac091a1564",
-              "ms": 1212.2859999999998,
+              "ms": 1230.087,
               "runs": [
-                1205.773,
-                1212.2859999999998,
-                1246.634
+                1179.351,
+                1230.087,
+                1233.453
               ],
               "rows": 1
             },
@@ -103,22 +103,22 @@
               "name": "nested loop only",
               "plan": "d01a441fa635ebcd",
               "same_plan_as_default": true,
-              "ms": 625.1229999999999,
+              "ms": 574.3679999999999,
               "runs": [
-                739.375,
-                610.668,
-                625.1229999999999
+                574.3679999999999,
+                590.491,
+                541.3839999999999
               ],
               "rows": 1
             },
             {
               "name": "no bitmap scan",
               "plan": "595f19a54f0b7317",
-              "ms": 536.8380000000001,
+              "ms": 507.796,
               "runs": [
-                564.1279999999999,
-                496.332,
-                536.8380000000001
+                674.5550000000001,
+                507.796,
+                503.971
               ],
               "rows": 1
             },
@@ -126,22 +126,22 @@
               "name": "no hash join",
               "plan": "d01a441fa635ebcd",
               "same_plan_as_default": true,
-              "ms": 625.1229999999999,
+              "ms": 574.3679999999999,
               "runs": [
-                739.375,
-                610.668,
-                625.1229999999999
+                574.3679999999999,
+                590.491,
+                541.3839999999999
               ],
               "rows": 1
             },
             {
               "name": "no index scan",
               "plan": "59b66a9098669972",
-              "ms": 825.803,
+              "ms": 779.7969999999999,
               "runs": [
-                935.617,
-                766.4979999999999,
-                825.803
+                788.4,
+                752.602,
+                779.7969999999999
               ],
               "rows": 1
             },
@@ -149,11 +149,11 @@
               "name": "no memoize",
               "plan": "d01a441fa635ebcd",
               "same_plan_as_default": true,
-              "ms": 625.1229999999999,
+              "ms": 574.3679999999999,
               "runs": [
-                739.375,
-                610.668,
-                625.1229999999999
+                574.3679999999999,
+                590.491,
+                541.3839999999999
               ],
               "rows": 1
             },
@@ -161,55 +161,55 @@
               "name": "no merge join",
               "plan": "d01a441fa635ebcd",
               "same_plan_as_default": true,
-              "ms": 625.1229999999999,
+              "ms": 574.3679999999999,
               "runs": [
-                739.375,
-                610.668,
-                625.1229999999999
+                574.3679999999999,
+                590.491,
+                541.3839999999999
               ],
               "rows": 1
             },
             {
               "name": "no nested loop",
               "plan": "a8796c493852fe72",
-              "ms": 552.61,
+              "ms": 473.81100000000004,
               "runs": [
-                575.9340000000001,
-                517.958,
-                552.61
+                545.945,
+                473.81100000000004,
+                432.28400000000005
               ],
               "rows": 1
             },
             {
               "name": "no nested loop, no sequential scan",
               "plan": "c20ddc735bf33d4e",
-              "ms": 940.551,
+              "ms": 937.094,
               "runs": [
-                923.997,
-                940.551,
-                1091.8509999999999
+                976.439,
+                937.094,
+                928.1869999999999
               ],
               "rows": 1
             },
             {
               "name": "no parallel workers",
               "plan": "aa1c43ed1fc22f2b",
-              "ms": 1018.8050000000001,
+              "ms": 941.1990000000001,
               "runs": [
-                1005.243,
-                1018.8050000000001,
-                1210.3029999999999
+                995.266,
+                886.032,
+                941.1990000000001
               ],
               "rows": 1
             },
             {
               "name": "no sequential scan",
               "plan": "07ba8c1575289106",
-              "ms": 628.959,
+              "ms": 570.54,
               "runs": [
-                648.361,
-                595.082,
-                628.959
+                574.537,
+                556.699,
+                570.54
               ],
               "rows": 1
             }
@@ -217,11 +217,11 @@
         },
         {
           "text": "SELECT sum(l.qty)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n WHERE c.attrs->>'tier' = 'basic' AND c.attrs->>'channel' = 'web'",
-          "baseline_ms": 1592.383,
+          "baseline_ms": 1547.441,
           "baseline_runs": [
-            1592.383,
-            1438.836,
-            1611.365
+            1613.9669999999999,
+            1545.084,
+            1547.441
           ],
           "rows": 1,
           "baseline_plan": [
@@ -235,11 +235,11 @@
             {
               "name": "hash join only",
               "plan": "a8796c493852fe72",
-              "ms": 820.9540000000001,
+              "ms": 893.533,
               "runs": [
-                923.9979999999999,
-                820.9540000000001,
-                811.279
+                922.8729999999999,
+                878.548,
+                893.533
               ],
               "rows": 1
             },
@@ -247,22 +247,22 @@
               "name": "join order as written",
               "plan": "d01a441fa635ebcd",
               "same_plan_as_default": true,
-              "ms": 1592.383,
+              "ms": 1547.441,
               "runs": [
-                1592.383,
-                1438.836,
-                1611.365
+                1613.9669999999999,
+                1545.084,
+                1547.441
               ],
               "rows": 1
             },
             {
               "name": "merge join only",
               "plan": "375465ac091a1564",
-              "ms": 1762.48,
+              "ms": 1741.7749999999999,
               "runs": [
-                1728.998,
-                1846.145,
-                1762.48
+                1741.7749999999999,
+                1821.553,
+                1641.503
               ],
               "rows": 1
             },
@@ -270,22 +270,22 @@
               "name": "nested loop only",
               "plan": "d01a441fa635ebcd",
               "same_plan_as_default": true,
-              "ms": 1592.383,
+              "ms": 1547.441,
               "runs": [
-                1592.383,
-                1438.836,
-                1611.365
+                1613.9669999999999,
+                1545.084,
+                1547.441
               ],
               "rows": 1
             },
             {
               "name": "no bitmap scan",
               "plan": "595f19a54f0b7317",
-              "ms": 1332.11,
+              "ms": 1287.458,
               "runs": [
-                1319.903,
-                1332.11,
-                1369.9489999999998
+                1240.4740000000002,
+                1435.393,
+                1287.458
               ],
               "rows": 1
             },
@@ -293,22 +293,22 @@
               "name": "no hash join",
               "plan": "d01a441fa635ebcd",
               "same_plan_as_default": true,
-              "ms": 1592.383,
+              "ms": 1547.441,
               "runs": [
-                1592.383,
-                1438.836,
-                1611.365
+                1613.9669999999999,
+                1545.084,
+                1547.441
               ],
               "rows": 1
             },
             {
               "name": "no index scan",
               "plan": "59b66a9098669972",
-              "ms": 2394.0499999999997,
+              "ms": 2199.687,
               "runs": [
-                2394.0499999999997,
-                2566.356,
-                2211.388
+                2199.687,
+                2237.7690000000002,
+                2096.373
               ],
               "rows": 1
             },
@@ -316,11 +316,11 @@
               "name": "no memoize",
               "plan": "d01a441fa635ebcd",
               "same_plan_as_default": true,
-              "ms": 1592.383,
+              "ms": 1547.441,
               "runs": [
-                1592.383,
-                1438.836,
-                1611.365
+                1613.9669999999999,
+                1545.084,
+                1547.441
               ],
               "rows": 1
             },
@@ -328,55 +328,55 @@
               "name": "no merge join",
               "plan": "d01a441fa635ebcd",
               "same_plan_as_default": true,
-              "ms": 1592.383,
+              "ms": 1547.441,
               "runs": [
-                1592.383,
-                1438.836,
-                1611.365
+                1613.9669999999999,
+                1545.084,
+                1547.441
               ],
               "rows": 1
             },
             {
               "name": "no nested loop",
               "plan": "a8796c493852fe72",
-              "ms": 820.9540000000001,
+              "ms": 893.533,
               "runs": [
-                923.9979999999999,
-                820.9540000000001,
-                811.279
+                922.8729999999999,
+                878.548,
+                893.533
               ],
               "rows": 1
             },
             {
               "name": "no nested loop, no sequential scan",
               "plan": "c20ddc735bf33d4e",
-              "ms": 1170.363,
+              "ms": 1190.971,
               "runs": [
-                1170.363,
-                1209.6280000000002,
-                1107.123
+                1243.656,
+                1129.287,
+                1190.971
               ],
               "rows": 1
             },
             {
               "name": "no parallel workers",
               "plan": "aa1c43ed1fc22f2b",
-              "ms": 2519.878,
+              "ms": 2681.756,
               "runs": [
-                2880.69,
-                2519.878,
-                2398.1479999999997
+                2681.756,
+                2945.383,
+                2591.982
               ],
               "rows": 1
             },
             {
               "name": "no sequential scan",
               "plan": "07ba8c1575289106",
-              "ms": 1546.2450000000001,
+              "ms": 1549,
               "runs": [
-                1681.31,
-                1546.2450000000001,
-                1505.4350000000002
+                1549,
+                1588.343,
+                1444.437
               ],
               "rows": 1
             }
@@ -386,22 +386,22 @@
     },
     {
       "id": "24eb83c21651051b",
-      "query_id": "-6696421783970953582",
+      "query_id": "-7384717398538095901",
       "normalized": "select id from lqo_demo . customers where attrs ->> ? = ? order by created_at desc limit ?",
       "calls": 2,
       "example": "SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' = 'partner' ORDER BY created_at DESC LIMIT 20",
       "verdict": "keep",
       "reason": "no other plan was clearly faster",
-      "baseline_ms": 35.686,
+      "baseline_ms": 35.016,
       "distinct_plans": 2,
       "samples": [
         {
           "text": "SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' = 'partner' ORDER BY created_at DESC LIMIT 20",
-          "baseline_ms": 0.126,
+          "baseline_ms": 0.08499999999999999,
           "baseline_runs": [
-            0.096,
-            0.133,
-            0.126
+            0.08199999999999999,
+            0.08499999999999999,
+            0.12
           ],
           "rows": 20,
           "baseline_plan": [
@@ -412,11 +412,11 @@
               "name": "hash join only",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
@@ -424,11 +424,11 @@
               "name": "join order as written",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
@@ -436,11 +436,11 @@
               "name": "merge join only",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
@@ -448,11 +448,11 @@
               "name": "nested loop only",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
@@ -460,11 +460,11 @@
               "name": "no bitmap scan",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
@@ -472,22 +472,22 @@
               "name": "no hash join",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
             {
               "name": "no index scan",
               "plan": "1897679b304a519b",
-              "ms": 27.816,
+              "ms": 28.648,
               "runs": [
-                28.166,
-                27.676,
-                27.816
+                29.589,
+                28.648,
+                27.131
               ],
               "rows": 20
             },
@@ -495,11 +495,11 @@
               "name": "no memoize",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
@@ -507,11 +507,11 @@
               "name": "no merge join",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
@@ -519,11 +519,11 @@
               "name": "no nested loop",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
@@ -531,11 +531,11 @@
               "name": "no nested loop, no sequential scan",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
@@ -543,11 +543,11 @@
               "name": "no parallel workers",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             },
@@ -555,11 +555,11 @@
               "name": "no sequential scan",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 0.126,
+              "ms": 0.08499999999999999,
               "runs": [
-                0.096,
-                0.133,
-                0.126
+                0.08199999999999999,
+                0.08499999999999999,
+                0.12
               ],
               "rows": 20
             }
@@ -567,11 +567,11 @@
         },
         {
           "text": "SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' = 'reseller' ORDER BY created_at DESC LIMIT 20",
-          "baseline_ms": 35.56,
+          "baseline_ms": 34.931,
           "baseline_runs": [
-            36.086,
-            35.42400000000001,
-            35.56
+            35.094,
+            34.931,
+            33.785
           ],
           "rows": 0,
           "baseline_plan": [
@@ -582,142 +582,142 @@
               "name": "hash join only",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "join order as written",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "merge join only",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "nested loop only",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "no bitmap scan",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "no hash join",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "no index scan",
               "plan": "1897679b304a519b",
-              "ms": 32.39,
+              "ms": 28.441,
               "runs": [
-                33.543000000000006,
-                32.355000000000004,
-                32.39
+                24.611,
+                31.591,
+                28.441
               ]
             },
             {
               "name": "no memoize",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "no merge join",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "no nested loop",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "no nested loop, no sequential scan",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "no parallel workers",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             },
             {
               "name": "no sequential scan",
               "plan": "302faf69b079e30e",
               "same_plan_as_default": true,
-              "ms": 35.56,
+              "ms": 34.931,
               "runs": [
-                36.086,
-                35.42400000000001,
-                35.56
+                35.094,
+                34.931,
+                33.785
               ]
             }
           ]
@@ -726,12 +726,12 @@
     },
     {
       "id": "6c73a7a66e08d880",
-      "query_id": "-1928681118179808862",
+      "query_id": "1918814238577494465",
       "normalized": "select id , created_at from lqo_demo . customers where attrs ->> ? = ? order by created_at limit ?",
       "calls": 1,
       "example": "SELECT id, created_at\n  FROM lqo_demo.customers\n WHERE attrs->>'tier' = 'platinum'\n ORDER BY created_at\n LIMIT 10",
       "verdict": "faster",
-      "baseline_ms": 36.385,
+      "baseline_ms": 35.097,
       "best": {
         "name": "no index scan",
         "settings": [
@@ -748,19 +748,19 @@
           "SET LOCAL enable_indexscan = off;",
           "SET LOCAL enable_indexonlyscan = off;"
         ],
-        "ms": 26.269,
-        "gain": 0.27802665933763915,
+        "ms": 24.676000000000002,
+        "gain": 0.2969199646693449,
         "plan_change": "Index Scan on customers → Seq Scan on customers"
       },
       "distinct_plans": 2,
       "samples": [
         {
           "text": "SELECT id, created_at\n  FROM lqo_demo.customers\n WHERE attrs->>'tier' = 'platinum'\n ORDER BY created_at\n LIMIT 10",
-          "baseline_ms": 36.385,
+          "baseline_ms": 35.097,
           "baseline_runs": [
-            42.074000000000005,
-            34.385,
-            36.385
+            33.804,
+            35.097,
+            40.608000000000004
           ],
           "rows": 10,
           "baseline_plan": [
@@ -771,11 +771,11 @@
               "name": "hash join only",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
@@ -783,11 +783,11 @@
               "name": "join order as written",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
@@ -795,11 +795,11 @@
               "name": "merge join only",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
@@ -807,11 +807,11 @@
               "name": "nested loop only",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
@@ -819,11 +819,11 @@
               "name": "no bitmap scan",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
@@ -831,22 +831,22 @@
               "name": "no hash join",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
             {
               "name": "no index scan",
               "plan": "1897679b304a519b",
-              "ms": 26.269,
+              "ms": 24.676000000000002,
               "runs": [
-                26.269,
-                25.606,
-                27.053
+                24.676000000000002,
+                27.062,
+                24.573999999999998
               ],
               "rows": 10
             },
@@ -854,11 +854,11 @@
               "name": "no memoize",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
@@ -866,11 +866,11 @@
               "name": "no merge join",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
@@ -878,11 +878,11 @@
               "name": "no nested loop",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
@@ -890,11 +890,11 @@
               "name": "no nested loop, no sequential scan",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
@@ -902,11 +902,11 @@
               "name": "no parallel workers",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             },
@@ -914,11 +914,11 @@
               "name": "no sequential scan",
               "plan": "3575f6f86ba93ac4",
               "same_plan_as_default": true,
-              "ms": 36.385,
+              "ms": 35.097,
               "runs": [
-                42.074000000000005,
-                34.385,
-                36.385
+                33.804,
+                35.097,
+                40.608000000000004
               ],
               "rows": 10
             }
@@ -928,22 +928,22 @@
     },
     {
       "id": "5fcb12e39b337776",
-      "query_id": "2245524530689874524",
+      "query_id": "-2912937643293107382",
       "normalized": "select c . id , count ( * ) , sum ( l . qty ) from lqo_demo . customers c join lqo_demo . orders o on o . customer_id = c . id join lqo_demo . order_lines l on l . order_id = o . id where c . id = ? group by c . id",
       "calls": 1,
       "example": "SELECT c.id, count(*), sum(l.qty)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n WHERE c.id = 4242\n GROUP BY c.id",
       "verdict": "keep",
       "reason": "no other plan was clearly faster",
-      "baseline_ms": 0.326,
+      "baseline_ms": 0.212,
       "distinct_plans": 6,
       "samples": [
         {
           "text": "SELECT c.id, count(*), sum(l.qty)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n WHERE c.id = 4242\n GROUP BY c.id",
-          "baseline_ms": 0.326,
+          "baseline_ms": 0.212,
           "baseline_runs": [
-            0.326,
-            0.291,
-            0.336
+            0.19,
+            0.212,
+            0.24
           ],
           "rows": 1,
           "baseline_plan": [
@@ -963,11 +963,11 @@
               "name": "join order as written",
               "plan": "293a76a45af772a1",
               "same_plan_as_default": true,
-              "ms": 0.326,
+              "ms": 0.212,
               "runs": [
-                0.326,
-                0.291,
-                0.336
+                0.19,
+                0.212,
+                0.24
               ],
               "rows": 1
             },
@@ -980,22 +980,22 @@
               "name": "nested loop only",
               "plan": "293a76a45af772a1",
               "same_plan_as_default": true,
-              "ms": 0.326,
+              "ms": 0.212,
               "runs": [
-                0.326,
-                0.291,
-                0.336
+                0.19,
+                0.212,
+                0.24
               ],
               "rows": 1
             },
             {
               "name": "no bitmap scan",
               "plan": "cf537bac6269c19b",
-              "ms": 0.313,
+              "ms": 0.185,
               "runs": [
-                0.46699999999999997,
-                0.313,
-                0.258
+                0.331,
+                0.166,
+                0.185
               ],
               "rows": 1
             },
@@ -1003,22 +1003,22 @@
               "name": "no hash join",
               "plan": "293a76a45af772a1",
               "same_plan_as_default": true,
-              "ms": 0.326,
+              "ms": 0.212,
               "runs": [
-                0.326,
-                0.291,
-                0.336
+                0.19,
+                0.212,
+                0.24
               ],
               "rows": 1
             },
             {
               "name": "no index scan",
               "plan": "b9735831aba81e99",
-              "ms": 0.347,
+              "ms": 0.213,
               "runs": [
-                0.365,
-                0.303,
-                0.347
+                0.22199999999999998,
+                0.213,
+                0.184
               ],
               "rows": 1
             },
@@ -1026,11 +1026,11 @@
               "name": "no memoize",
               "plan": "293a76a45af772a1",
               "same_plan_as_default": true,
-              "ms": 0.326,
+              "ms": 0.212,
               "runs": [
-                0.326,
-                0.291,
-                0.336
+                0.19,
+                0.212,
+                0.24
               ],
               "rows": 1
             },
@@ -1038,11 +1038,11 @@
               "name": "no merge join",
               "plan": "293a76a45af772a1",
               "same_plan_as_default": true,
-              "ms": 0.326,
+              "ms": 0.212,
               "runs": [
-                0.326,
-                0.291,
-                0.336
+                0.19,
+                0.212,
+                0.24
               ],
               "rows": 1
             },
@@ -1053,18 +1053,18 @@
             },
             {
               "name": "no nested loop, no sequential scan",
-              "plan": "d6adffc1f4d48431",
+              "plan": "9244145a603cc314",
               "timed_out": true
             },
             {
               "name": "no parallel workers",
               "plan": "293a76a45af772a1",
               "same_plan_as_default": true,
-              "ms": 0.326,
+              "ms": 0.212,
               "runs": [
-                0.326,
-                0.291,
-                0.336
+                0.19,
+                0.212,
+                0.24
               ],
               "rows": 1
             },
@@ -1072,11 +1072,11 @@
               "name": "no sequential scan",
               "plan": "293a76a45af772a1",
               "same_plan_as_default": true,
-              "ms": 0.326,
+              "ms": 0.212,
               "runs": [
-                0.326,
-                0.291,
-                0.336
+                0.19,
+                0.212,
+                0.24
               ],
               "rows": 1
             }
@@ -1086,22 +1086,22 @@
     },
     {
       "id": "b690ee77412e9728",
-      "query_id": "-8843117345050022778",
+      "query_id": "7067446562166444453",
       "normalized": "select region , count ( * ) from lqo_demo . customers group by region order by region",
       "calls": 1,
       "example": "SELECT region, count(*) FROM lqo_demo.customers GROUP BY region ORDER BY region",
       "verdict": "keep",
       "reason": "no other plan was clearly faster",
-      "baseline_ms": 24.963,
+      "baseline_ms": 25.516000000000002,
       "distinct_plans": 3,
       "samples": [
         {
           "text": "SELECT region, count(*) FROM lqo_demo.customers GROUP BY region ORDER BY region",
-          "baseline_ms": 24.963,
+          "baseline_ms": 25.516000000000002,
           "baseline_runs": [
-            26.383,
-            23.461,
-            24.963
+            25.516000000000002,
+            30.733999999999998,
+            24.613
           ],
           "rows": 100,
           "baseline_plan": [
@@ -1112,11 +1112,11 @@
               "name": "hash join only",
               "plan": "1f62b44fe6111b4d",
               "same_plan_as_default": true,
-              "ms": 24.963,
+              "ms": 25.516000000000002,
               "runs": [
-                26.383,
-                23.461,
-                24.963
+                25.516000000000002,
+                30.733999999999998,
+                24.613
               ],
               "rows": 100
             },
@@ -1124,11 +1124,11 @@
               "name": "join order as written",
               "plan": "1f62b44fe6111b4d",
               "same_plan_as_default": true,
-              "ms": 24.963,
+              "ms": 25.516000000000002,
               "runs": [
-                26.383,
-                23.461,
-                24.963
+                25.516000000000002,
+                30.733999999999998,
+                24.613
               ],
               "rows": 100
             },
@@ -1136,11 +1136,11 @@
               "name": "merge join only",
               "plan": "1f62b44fe6111b4d",
               "same_plan_as_default": true,
-              "ms": 24.963,
+              "ms": 25.516000000000002,
               "runs": [
-                26.383,
-                23.461,
-                24.963
+                25.516000000000002,
+                30.733999999999998,
+                24.613
               ],
               "rows": 100
             },
@@ -1148,11 +1148,11 @@
               "name": "nested loop only",
               "plan": "1f62b44fe6111b4d",
               "same_plan_as_default": true,
-              "ms": 24.963,
+              "ms": 25.516000000000002,
               "runs": [
-                26.383,
-                23.461,
-                24.963
+                25.516000000000002,
+                30.733999999999998,
+                24.613
               ],
               "rows": 100
             },
@@ -1160,11 +1160,11 @@
               "name": "no bitmap scan",
               "plan": "1f62b44fe6111b4d",
               "same_plan_as_default": true,
-              "ms": 24.963,
+              "ms": 25.516000000000002,
               "runs": [
-                26.383,
-                23.461,
-                24.963
+                25.516000000000002,
+                30.733999999999998,
+                24.613
               ],
               "rows": 100
             },
@@ -1172,11 +1172,11 @@
               "name": "no hash join",
               "plan": "1f62b44fe6111b4d",
               "same_plan_as_default": true,
-              "ms": 24.963,
+              "ms": 25.516000000000002,
               "runs": [
-                26.383,
-                23.461,
-                24.963
+                25.516000000000002,
+                30.733999999999998,
+                24.613
               ],
               "rows": 100
             },
@@ -1184,11 +1184,11 @@
               "name": "no index scan",
               "plan": "1f62b44fe6111b4d",
               "same_plan_as_default": true,
-              "ms": 24.963,
+              "ms": 25.516000000000002,
               "runs": [
-                26.383,
-                23.461,
-                24.963
+                25.516000000000002,
+                30.733999999999998,
+                24.613
               ],
               "rows": 100
             },
@@ -1196,11 +1196,11 @@
               "name": "no memoize",
               "plan": "1f62b44fe6111b4d",
               "same_plan_as_default": true,
-              "ms": 24.963,
+              "ms": 25.516000000000002,
               "runs": [
-                26.383,
-                23.461,
-                24.963
+                25.516000000000002,
+                30.733999999999998,
+                24.613
               ],
               "rows": 100
             },
@@ -1208,11 +1208,11 @@
               "name": "no merge join",
               "plan": "1f62b44fe6111b4d",
               "same_plan_as_default": true,
-              "ms": 24.963,
+              "ms": 25.516000000000002,
               "runs": [
-                26.383,
-                23.461,
-                24.963
+                25.516000000000002,
+                30.733999999999998,
+                24.613
               ],
               "rows": 100
             },
@@ -1220,44 +1220,44 @@
               "name": "no nested loop",
               "plan": "1f62b44fe6111b4d",
               "same_plan_as_default": true,
-              "ms": 24.963,
+              "ms": 25.516000000000002,
               "runs": [
-                26.383,
-                23.461,
-                24.963
+                25.516000000000002,
+                30.733999999999998,
+                24.613
               ],
               "rows": 100
             },
             {
               "name": "no nested loop, no sequential scan",
               "plan": "1a63f845b82e5a2a",
-              "ms": 70.46300000000001,
+              "ms": 76.01899999999999,
               "runs": [
-                71.594,
-                67.001,
-                70.46300000000001
+                78.395,
+                71.75999999999999,
+                76.01899999999999
               ],
               "rows": 100
             },
             {
               "name": "no parallel workers",
               "plan": "ab33c58311903aab",
-              "ms": 25.788999999999998,
+              "ms": 27.026,
               "runs": [
-                25.314999999999998,
-                25.788999999999998,
-                25.986
+                38.074,
+                27.026,
+                24.765
               ],
               "rows": 100
             },
             {
               "name": "no sequential scan",
               "plan": "1a63f845b82e5a2a",
-              "ms": 70.46300000000001,
+              "ms": 76.01899999999999,
               "runs": [
-                71.594,
-                67.001,
-                70.46300000000001
+                78.395,
+                71.75999999999999,
+                76.01899999999999
               ],
               "rows": 100
             }

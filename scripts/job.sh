@@ -58,7 +58,7 @@ done
 echo "== lqo advise"
 go build -o "$work/lqo" ./cmd/lqo
 start=$(date +%s)
-"$work/lqo" advise --dsn "$LQO_DSN" --allow-primary --top 113 --repeat 3 --samples 1 \
+"$work/lqo" advise --dsn "$LQO_DSN" --allow-primary --top 113 --repeat 3 --samples 10 \
 	--max-time "${JOB_MAX_TIME:-120s}" --state "$work/state.json" \
 	--report json --out "$out/job.json" "$work/job.sql"
 end=$(date +%s)
@@ -73,6 +73,6 @@ end=$(date +%s)
 	echo "settings: $(psql "$LQO_DSN" -Atc "SELECT string_agg(name || '=' || setting || coalesce(unit, ''), ', ' ORDER BY name) FROM pg_settings WHERE name IN ('shared_buffers', 'work_mem', 'effective_cache_size', 'max_parallel_workers_per_gather', 'random_page_cost', 'jit')")"
 	echo "queries: github.com/gregrahn/join-order-benchmark at $(cat "$work/job-commit.txt")"
 	echo "data: $(cat "$work/imdb-url.txt" 2>/dev/null || echo 'already downloaded')"
-	echo "command: lqo advise --allow-primary --top 113 --repeat 3 --samples 1 --max-time ${JOB_MAX_TIME:-120s}"
+	echo "command: lqo advise --allow-primary --top 113 --repeat 3 --samples 10 --max-time ${JOB_MAX_TIME:-120s}"
 } > "$out/environment.txt"
 echo "results written to $out/"

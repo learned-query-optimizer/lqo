@@ -181,10 +181,45 @@ var urlParams = map[string]string{
 }
 
 func parseURL(dsn string, kv map[string]string) error {
+	// libpq accepts a socket directory as a percent-encoded host
+	// (postgres://%2Fvar%2Frun%2Fpostgresql/db), which Go's URL parser
+	// refuses, so that host is taken out first.
+	socketHost, socketPort := "", ""
+	if scheme, rest, ok := strings.Cut(dsn, "://"); ok {
+		end := strings.IndexAny(rest, "/?")
+		if end < 0 {
+			end = len(rest)
+		}
+		auth := rest[:end]
+		userinfo, host := "", auth
+		if at := strings.LastIndexByte(auth, '@'); at >= 0 {
+			userinfo, host = auth[:at+1], auth[at+1:]
+		}
+		if strings.Contains(host, "%") && !strings.HasPrefix(host, "[") {
+			h, p := host, ""
+			if i := strings.LastIndexByte(host, ':'); i >= 0 {
+				h, p = host[:i], host[i+1:]
+			}
+			dec, err := url.PathUnescape(h)
+			if err != nil {
+				return fmt.Errorf("invalid host in connection URL: %w", err)
+			}
+			socketHost, socketPort = dec, p
+			dsn = scheme + "://" + userinfo + "localhost" + rest[end:]
+		}
+	}
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return fmt.Errorf("invalid connection URL: %w", err)
 	}
+	defer func() {
+		if socketHost != "" {
+			kv["host"] = socketHost
+			if socketPort != "" {
+				kv["port"] = socketPort
+			}
+		}
+	}()
 	if u.User != nil {
 		kv["user"] = u.User.Username()
 		if p, ok := u.User.Password(); ok {

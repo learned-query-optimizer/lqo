@@ -19,7 +19,8 @@ LQO has its own small PostgreSQL client, so it needs no libpq. It accepts:
   such as `@` in a password are percent-encoded (`%40`). The query string takes
   `sslmode`, `sslrootcert`, `sslcert`, `sslkey`, `application_name`,
   `connect_timeout`, `options`, `passfile`, `host`, `port`, `user`, `password` and
-  `dbname`.
+  `dbname`. A socket directory can be the host, percent-encoded:
+  `postgres://app@%2Fvar%2Frun%2Fpostgresql/shop`.
 - **Keywords:** `host=replica port=5432 user=lqo dbname=shop`. Values with spaces
   go in single quotes; `\'` and `\\` escape inside them. `hostaddr`, `gssencmode`,
   `target_session_attrs` and `client_encoding` are accepted and ignored.
@@ -36,6 +37,8 @@ or `passfile`), which is read only when no one but its owner can read it, as lib
 does.
 
 Login methods: trust, password, md5 and SCRAM-SHA-256 (without channel binding).
+SCRAM passwords are sent as written, without the SASLprep normalisation libpq
+applies, which only matters for passwords with unusual Unicode characters.
 GSSAPI, SSPI and certificate-only logins aren't supported in 0.1; a client
 certificate can still be sent with `sslcert` and `sslkey`.
 
@@ -44,7 +47,8 @@ TLS follows `sslmode`:
 | sslmode | What LQO does |
 |---|---|
 | `disable` | plain connection |
-| `allow`, `prefer` | TLS if the server offers it, without checking the certificate |
+| `allow` | plain connection (LQO doesn't fall back to TLS) |
+| `prefer` | TLS if the server offers it, without checking the certificate |
 | `require` | TLS or fail, without checking the certificate; with `sslrootcert` set, as `verify-ca` |
 | `verify-ca` | TLS, certificate chain checked against `sslrootcert` (or `~/.postgresql/root.crt`, or `system`) |
 | `verify-full` | as `verify-ca`, and the host name must match the certificate |
@@ -118,16 +122,20 @@ For one shape, with texts *s₁ … sₙ* and hint *h*:
 
 *h* is suggested when all of these hold:
 
-1. On every text, *h*'s plan ran, returned the same number of rows as the default
-   plan, and its median time was at most 110% of the default plan's median.
+1. On every text, *h*'s plan ran, every one of its runs returned the same number
+   of rows as every run of the default plan, and its median time was at most 110%
+   of the default plan's median. If the default plan's own runs disagree on the
+   rows, no hint is suggested for the shape.
 2. On at least one text, *h*'s plan differs from the default, its slowest run was
    faster than the default plan's fastest, and its median saved at least
    `--min-gain`.
 3. Summed over the texts, *h*'s medians are at most (1 − `--min-gain`) × the
    default plan's.
 
-Among hints that pass, the one with the lowest summed median wins; hints within 2%
-of each other are separated by the number of settings they change, fewer first.
+Among hints that pass, the one with the lowest summed median wins, unless another
+is within 2% of it and changes fewer settings; then that one wins. Between hints
+that change as many settings, the lower sum wins. A text that fails to run after
+the first one rules out every hint for the shape, and isn't counted in its times.
 Hints that ran exactly the same plans as the winner are listed in the JSON report
 as `same_plan_as`.
 
@@ -198,8 +206,10 @@ is renamed to `lqo-state.json.damaged-<time>` and a new one is started.
 
 LQO needs to connect, read `pg_settings`, and run `EXPLAIN ANALYZE` on the
 workload's queries, so the role needs `SELECT` on the tables they read. A
-read-only role is enough. Switching `compute_query_id` on needs a superuser; without
-one, shapes have no query ID and nothing else changes.
+read-only role is enough, and is the better choice: LQO checks the SQL it runs,
+but a role that can't write is a second guard that doesn't depend on that check.
+Switching `compute_query_id` on needs a superuser; without one, shapes have no
+query ID and nothing else changes.
 
 `lqo demo` needs to create a schema and tables.
 

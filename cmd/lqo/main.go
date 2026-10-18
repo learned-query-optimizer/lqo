@@ -112,7 +112,10 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
 	for {
 		if err := fs.Parse(args); err != nil {
-			return nil, err
+			if errors.Is(err, flag.ErrHelp) {
+				return nil, err
+			}
+			return nil, usageError{err.Error()}
 		}
 		rest := fs.Args()
 		if len(rest) == 0 {
@@ -187,6 +190,14 @@ func cmdAdvise(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	}
 	if *minGain <= 0 || *minGain >= 100 {
 		return usageError{"--min-gain is a percent between 0 and 100"}
+	}
+	if _, err := hints.Set(*hintSet); err != nil {
+		return usageError{err.Error()}
+	}
+	switch *format {
+	case "auto", "sql", "stderr", "csv", "json":
+	default:
+		return usageError{fmt.Sprintf("unknown workload format %q", *format)}
 	}
 
 	var statements []workload.Statement

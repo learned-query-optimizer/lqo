@@ -150,6 +150,13 @@ func TestClassify(t *testing.T) {
 		"SELECT 1; SELECT 2":                                           "more than one",
 		"-- nothing":                                                   "empty",
 		"MERGE INTO t USING u ON t.id = u.id WHEN MATCHED THEN DELETE": "only reads",
+		`SELECT "pg_advisory_lock"(424242)`:                            "pg_advisory_lock",
+		`SELECT pg_catalog."pg_terminate_backend"(1)`:                  "pg_terminate_backend",
+		`SELECT "PG_SLEEP"(1)`:                                         "pg_sleep",
+		`SELECT U&"pg\0073leep"(1)`:                                    "Unicode",
+		"SELECT query_to_xml('delete from t', true, false, '')":        "query_to_xml",
+		"SELECT pg_replication_slot_advance('s', '0/0')":               "pg_replication_slot_advance",
+		"SELECT 1 AS a --note\r; COMMIT; CREATE TABLE t(x int)":        "more than one",
 	}
 	for s, want := range skipped {
 		r := Classify(s)
