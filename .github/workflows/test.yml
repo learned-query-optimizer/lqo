@@ -50,10 +50,10 @@ jobs:
           sh scripts/smoke.sh ./lqo "$LQO_TEST_DSN"
 
   # The row-count hints need pg_hint_plan, which the PostgreSQL images above
-  # don't have: here the runner's own PostgreSQL 16, with the extension from
-  # the PostgreSQL apt repository, preloaded.
+  # don't have: here the runner's own PostgreSQL, with the extension from the
+  # PostgreSQL apt repository, preloaded.
   pg-hint-plan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       LQO_TEST_DSN: postgres://postgres:lqo@localhost:5432/postgres?sslmode=disable
     steps:
@@ -64,7 +64,10 @@ jobs:
       - name: PostgreSQL 16 with pg_hint_plan
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q postgresql-16-pg-hint-plan
+          v=$(ls /usr/lib/postgresql | sort -n | tail -1)
+          sudo apt-get install -y -q postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q "postgresql-$v-pg-hint-plan"
           sudo systemctl start postgresql.service
           conf=$(sudo -u postgres psql -Atc 'SHOW config_file')
           echo "shared_preload_libraries = 'pg_hint_plan'" | sudo tee -a "$conf"
