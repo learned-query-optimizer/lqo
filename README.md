@@ -311,7 +311,11 @@ On the demo's trap, in the recorded run with pg_hint_plan, "row counts" took the
 two texts from 2,466 ms to 1,635 ms and from 2,363 ms to 1,644 ms, about a third
 less. Switching off nested loops took more than half off, so that's what LQO
 suggested. Row counts matter more where one query needs different join methods
-in different places, as many in the Join Order Benchmark do.
+in different places, as many in the Join Order Benchmark do. In a run of it with
+pg_hint_plan, the switches alone would have sped up 34 of the 94 query shapes,
+one pass from 133.1 s to 78.0 s; with row counts as well, 43 shapes and 69.8 s.
+Row counts won 13 shapes, 9 of them ones no switch passed the rule for
+([test/results/job-join-hints](test/results/job-join-hints)).
 
 ## Learn from live traffic: lqo serve
 
