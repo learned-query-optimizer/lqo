@@ -859,6 +859,10 @@ func (a *Advisor) sampleArms(ctx context.Context, text string, wantQueryID bool,
 			return sr, nil, err
 		}
 		sr.Error = errText(err)
+		if errors.Is(err, errTimeout) {
+			// Planning alone took longer than the time limit.
+			sr.Error = fmt.Sprintf("the default plan ran longer than %s", a.opt.MaxTime)
+		}
 		return sr, nil, nil
 	}
 	if wantQueryID {
