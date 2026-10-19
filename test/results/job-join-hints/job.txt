@@ -1,0 +1,286 @@
+LQO advisor report
+
+Server     PostgreSQL 16.15 (Ubuntu 16.15-1.pgdg24.04+2), database imdb (primary, allowed with --allow-primary)
+Workload   job.sql (sql): 113 statements, 94 shapes
+Settings   standard hints (13), 3 timed runs after a warm-up, up to 10 samples per shape, a hint must save 20%; row-count hints with pg_hint_plan
+
+Faster with a hint: 43 of 94 tested
+
+  1. dd1b70c1  SELECT MIN(t.title) AS movie_title FROM company_name AS cn, key…  (4 calls)
+     346 ms → 203 ms (−41%) with "row counts"
+     Plan: Nested Loop ×2, Index Scan on movie_companies, Index Scan on company_name → Hash Join ×2, Seq Scan on movie_companies, Seq Scan on company_name
+       /*+ Rows(k mk *1200) Rows(k mc mk *800) Rows(cn k mc mk *980) Rows(cn k mc mk t *980) */ -- at the start of the query, with pg_hint_plan
+
+  2. 718b520c  SELECT MIN(cn.name) AS producing_company, MIN(miidx.info) AS ra…  (2 calls)
+     445 ms → 127 ms (−72%) with "row counts"
+     Plan: Nested Loop, Seq Scan on movie_info_idx, Index Scan on title, Memoize, Index Scan on kind_type, Index Scan on company_type → Hash Join, Seq Scan on kind_type, Bitmap Heap Scan on title, Index Scan on movie_info_idx, Seq Scan on company_type
+       /*+ Rows(it miidx *30) Rows(it miidx t *120) Rows(it kt miidx t *30) Rows(it kt mc miidx t *100) Rows(ct it kt mc miidx t *39) Rows(cn ct it kt mc miidx t *20) Rows(cn ct it kt mc mi miidx t *350) Rows(cn ct it it2 kt mc mi miidx t *120) */ -- at the start of the query, with pg_hint_plan
+
+  3. a801be56  SELECT MIN(n.name) AS member_in_charnamed_movie, MIN(n.name) AS…  (2 calls)
+     3,862 ms → 2,466 ms (−36%) with "no nested loop"
+     Plan: Nested Loop ×6, Bitmap Heap Scan on movie_keyword, Index Scan on cast_info, Index Scan on name, Index Only Scan on title, Index Scan on movie_companies, Index Only Scan on company_name → Hash Join ×6, Seq Scan on company_name, Seq Scan on movie_companies, Seq Scan on title, Seq Scan on cast_info, Seq Scan on name, Seq Scan on movie_keyword
+       SET LOCAL enable_nestloop = off;
+
+  4. 73f27e86  SELECT MIN(n.name) AS member_in_charnamed_movie FROM cast_info …  (2 calls)
+     4,686 ms → 1,726 ms (−63%) with "row counts"
+     Plan: Nested Loop, Index Scan on name → Hash Join, Seq Scan on name
+       /*+ Rows(k mk *1200) Rows(ci k mk *860) Rows(ci k mk n *2000) Rows(ci k mc mk n *12000) Rows(ci cn k mc mk n *12000) Rows(ci cn k mc mk n t *12000) */ -- at the start of the query, with pg_hint_plan
+
+  5. 6d1d5dbb  SELECT MIN(kt.kind) AS movie_kind, MIN(t.title) AS complete_us_…  (2 calls)
+     262 ms → 187 ms (−29%) with "no hash join"
+     Plan: Hash Join ×3, Seq Scan on title, Memoize, Index Scan on info_type, Index Only Scan on company_type → Nested Loop ×3, Seq Scan on info_type, Index Scan on title, Seq Scan on company_type
+       SET LOCAL enable_hashjoin = off;
+
+  6. 0cf295d8  SELECT MIN(mc.note) AS production_note, MIN(t.title) AS movie_t…  (1 call)
+     75.1 ms → 4.99 ms (−93%) with "no hash join"
+     Plan: Hash Join ×2, Seq Scan on movie_info_idx → Nested Loop ×2, Bitmap Heap Scan on movie_info_idx
+       SET LOCAL enable_hashjoin = off;
+
+  7. 078dfa3f  SELECT MIN(mc.note) AS production_note, MIN(t.title) AS movie_t…  (1 call)
+     69.1 ms → 0.69 ms (−99%) with "no parallel workers"
+     Plan: Hash Join, Seq Scan on movie_info_idx → Nested Loop, Bitmap Heap Scan on movie_info_idx
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  8. ae99dc85  SELECT MIN(mc.note) AS production_note, MIN(t.title) AS movie_t…  (1 call)
+     73.8 ms → 3.80 ms (−95%) with "no parallel workers"
+     Plan: Hash Join, Seq Scan on movie_info_idx → Nested Loop, Bitmap Heap Scan on movie_info_idx
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  9. 450fe5f6  SELECT MIN(mc.note) AS production_note, MIN(t.title) AS movie_t…  (1 call)
+     68.7 ms → 0.72 ms (−99%) with "no parallel workers"
+     Plan: Hash Join, Seq Scan on movie_info_idx → Nested Loop, Bitmap Heap Scan on movie_info_idx
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  10. cc66d5be  SELECT MIN(n.name) AS of_person, MIN(t.title) AS biography_movi…  (1 call)
+     475 ms → 69.3 ms (−85%) with "row counts, second pass"
+     Plan: Nested Loop, Index Scan on person_info, Index Scan on info_type → Hash Join, Seq Scan on info_type, Bitmap Heap Scan on person_info, Memoize
+       /*+ Rows(it pi *64) Rows(lt ml *3.1) Rows(it n pi *17) Rows(lt ml t *6.5) Rows(ci it n pi *2700) Rows(ci lt ml t *13) Rows(an ci it n pi *3400) Rows(ci lt ml n t *19) Rows(an ci it ml n pi *510) Rows(ci lt ml n pi t *14) Rows(an ci it ml n pi t *110) Rows(an ci lt ml n pi t *32) Rows(an ci it lt ml n pi t *32) */ -- at the start of the query, with pg_hint_plan
+
+  11. 46b42be8  SELECT MIN(n.name) AS of_person, MIN(t.title) AS biography_movi…  (1 call)
+     132 ms → 63.7 ms (−52%) with "row counts"
+     Plan: Seq Scan on link_type, Bitmap Heap Scan on movie_link, Index Scan on person_info, Index Scan on info_type → Seq Scan on info_type, Bitmap Heap Scan on person_info, Index Scan on movie_link, Index Scan on link_type
+       /*+ Rows(lt ml *3.1) Rows(lt ml t *8.9) Rows(ci lt ml t *19) Rows(ci lt ml n t *27) Rows(ci lt ml n pi t *8) Rows(an ci lt ml n pi t *16) Rows(an ci it lt ml n pi t *16) */ -- at the start of the query, with pg_hint_plan
+
+  12. b8a77e31  SELECT MIN(n.name) AS cast_member_name, MIN(pi.info) AS cast_me…  (1 call)
+     2,134 ms → 1,123 ms (−47%) with "no index scan"
+     Plan: Nested Loop, Index Scan on aka_name, Index Scan on name, Index Scan on cast_info, Index Scan on movie_link, Index Scan on title → Hash Join, Bitmap Heap Scan on name, Bitmap Heap Scan on aka_name, Bitmap Heap Scan on cast_info, Seq Scan on movie_link, Bitmap Heap Scan on title
+       SET LOCAL enable_indexscan = off;
+       SET LOCAL enable_indexonlyscan = off;
+
+  13. 70b0406f  SELECT MIN(chn.name) AS uncredited_voiced_character, MIN(t.titl…  (1 call)
+     292 ms → 208 ms (−29%) with "no hash join"
+     Plan: Hash Join ×2, Seq Scan on movie_companies, Seq Scan on role_type → Nested Loop ×2, Index Scan on movie_companies, Memoize ×2, Index Scan on role_type
+       SET LOCAL enable_hashjoin = off;
+
+  14. 6eab06ef  SELECT MIN(chn.name) AS character, MIN(t.title) AS russian_mov_…  (1 call)
+     212 ms → 98.6 ms (−53%) with "no hash join"
+     Plan: Hash Join ×3, Seq Scan on movie_companies, Seq Scan on role_type, Seq Scan on company_type → Nested Loop ×3, Index Scan on movie_companies, Memoize ×2, Index Scan on role_type, Index Only Scan on company_type
+       SET LOCAL enable_hashjoin = off;
+
+  15. 534b68fc  SELECT MIN(chn.name) AS character, MIN(t.title) AS movie_with_a…  (1 call)
+     5,138 ms → 2,388 ms (−54%) with "no nested loop"
+     Plan: Nested Loop ×2, Index Scan on cast_info, Memoize, Index Scan on char_name → Hash Join ×2, Seq Scan on cast_info, Seq Scan on char_name
+       SET LOCAL enable_nestloop = off;
+
+  16. c3eba7e4  SELECT MIN(cn.name) AS from_company, MIN(lt.link) AS movie_link…  (1 call)
+     46.7 ms → 25.7 ms (−45%) with "row counts"
+     Plan: same joins and scans
+       /*+ Rows(k lt mk ml *200) Rows(k lt mk ml t *150) Rows(k lt mc mk ml t *710) Rows(cn k lt mc mk ml t *330) Rows(cn ct k lt mc mk ml t *310) */ -- at the start of the query, with pg_hint_plan
+
+  17. 850e1a80  SELECT MIN(cn.name) AS from_company, MIN(mc.note) AS production…  (1 call)
+     185 ms → 105 ms (−43%) with "no parallel workers"
+     Plan: Memoize, Index Scan on company_type, Index Only Scan on link_type → Seq Scan on company_type, Seq Scan on link_type
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  18. 8461866c  SELECT MIN(cn.name) AS from_company, MIN(mc.note) AS production…  (1 call)
+     169 ms → 92.8 ms (−45%) with "no parallel workers"
+     Plan: Hash Join ×2 → Nested Loop ×2
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  19. 729ccb90  SELECT MIN(mi.info) AS budget, MIN(t.title) AS unsuccsessful_mo…  (1 call)
+     75.4 ms → 2.77 ms (−96%) with "no parallel workers"
+     Plan: Hash Join, Seq Scan on movie_info_idx → Nested Loop, Bitmap Heap Scan on movie_info_idx
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  20. 91a61e77  SELECT MIN(mi.info) AS release_date, MIN(miidx.info) AS rating,…  (1 call)
+     1,024 ms → 484 ms (−53%) with "row counts"
+     Plan: Nested Loop, Seq Scan on movie_info_idx, Index Scan on movie_companies, Index Scan on company_name → Hash Join, Seq Scan on movie_companies, Seq Scan on company_name, Index Scan on movie_info_idx
+       /*+ Rows(it miidx *30) Rows(it miidx t *30) Rows(it kt miidx t *96) Rows(it kt mc miidx t *65) Rows(ct it kt mc miidx t *100) Rows(cn ct it kt mc miidx t *130) Rows(cn ct it kt mc mi miidx t *130) Rows(cn ct it it2 kt mc mi miidx t *3100) */ -- at the start of the query, with pg_hint_plan
+
+  21. 5798935c  SELECT MIN(at.title) AS aka_title, MIN(t.title) AS internet_mov…  (1 call)
+     475 ms → 370 ms (−22%) with "no index scan"
+     Plan: Nested Loop, Index Scan on title, Index Scan on movie_companies, Index Scan on company_name, Index Scan on movie_keyword, Index Only Scan on keyword, Index Scan on aka_title → Hash Join, Bitmap Heap Scan on aka_title, Bitmap Heap Scan on title, Bitmap Heap Scan on movie_companies, Bitmap Heap Scan on company_name, Bitmap Heap Scan on movie_keyword, Seq Scan on keyword
+       SET LOCAL enable_indexscan = off;
+       SET LOCAL enable_indexonlyscan = off;
+
+  22. 8f30d4e5  SELECT MIN(an.name) AS cool_actor_pseudonym, MIN(t.title) AS se…  (1 call)
+     11,721 ms → 3,446 ms (−71%) with "row counts"
+     Plan: Nested Loop ×4, Index Scan on title, Index Scan on movie_companies, Index Scan on company_name, Index Scan on aka_name → Hash Join ×4, Seq Scan on movie_companies, Seq Scan on company_name, Memoize, Seq Scan on aka_name, Seq Scan on title
+       /*+ Rows(k mk *1200) Rows(k mk t *1200) Rows(k mc mk t *800) Rows(cn k mc mk t *1000) Rows(ci cn k mc mk t *2500) Rows(ci cn k mc mk n t *2500) Rows(an ci cn k mc mk n t *1400) */ -- at the start of the query, with pg_hint_plan
+
+  23. 6d17eb01  SELECT MIN(n.name) AS member_in_charnamed_american_movie, MIN(n…  (1 call)
+     7,194 ms → 2,399 ms (−67%) with "row counts"
+     Plan: Nested Loop ×2, Index Scan on movie_companies, Index Scan on company_name → Hash Join ×2, Seq Scan on movie_companies, Seq Scan on company_name, Memoize
+       /*+ Rows(k mk *1200) Rows(k mk t *1200) Rows(k mc mk t *800) Rows(cn k mc mk t *1000) Rows(ci cn k mc mk t *2500) Rows(ci cn k mc mk n t *2800) */ -- at the start of the query, with pg_hint_plan
+
+  24. 85cf65fe  SELECT MIN(n.name) AS member_in_charnamed_movie FROM cast_info …  (1 call)
+     7,203 ms → 2,871 ms (−60%) with "row counts"
+     Plan: Nested Loop ×2, Index Scan on movie_companies, Index Scan on company_name → Hash Join ×2, Seq Scan on movie_companies, Seq Scan on company_name, Memoize ×2
+       /*+ Rows(k mk *1200) Rows(k mk t *1200) Rows(k mc mk t *800) Rows(cn k mc mk t *1000) Rows(ci cn k mc mk t *2500) Rows(ci cn k mc mk n t *2500) */ -- at the start of the query, with pg_hint_plan
+
+  25. 2656274c  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx.info) AS movie_…  (1 call)
+     2,338 ms → 381 ms (−84%) with "row counts"
+     Plan: Hash Join, Seq Scan on movie_info_idx, Seq Scan on info_type, Index Scan on name → Nested Loop, Seq Scan on name, Index Scan on movie_info_idx, Memoize, Index Scan on info_type
+       /*+ Rows(it2 mi_idx *30) Rows(it2 mi mi_idx *14) Rows(it1 it2 mi mi_idx *11) Rows(ci it1 it2 mi mi_idx *10) Rows(ci it1 it2 mi mi_idx n *140) Rows(ci it1 it2 mi mi_idx n t *410) */ -- at the start of the query, with pg_hint_plan
+
+  26. 8cf8918f  SELECT MIN(n.name) AS voicing_actress, MIN(t.title) AS jap_engl…  (1 call)
+     8,345 ms → 3,017 ms (−64%) with "no memoize"
+     Plan: Nested Loop ×3, Memoize, Index Scan on movie_companies, Index Scan on company_name → Hash Join ×3, Seq Scan on movie_companies, Seq Scan on company_name
+       SET LOCAL enable_memoize = off;
+
+  27. 0cc52afa  SELECT MIN(cn.name) AS company_name, MIN(lt.link) AS link_type,…  (1 call)
+     51.3 ms → 31.4 ms (−39%) with "row counts"
+     Plan: same joins and scans
+       /*+ Rows(k lt mk ml *200) Rows(k lt mi mk ml *120) Rows(k lt mc mi mk ml *750) Rows(cn k lt mc mi mk ml *330) Rows(cn ct k lt mc mi mk ml *310) Rows(cn ct k lt mc mi mk ml t *38) */ -- at the start of the query, with pg_hint_plan
+
+  28. 39172b8c  SELECT MIN(chn.name) AS voiced_char_name, MIN(n.name) AS voicin…  (1 call)
+     223 ms → 132 ms (−41%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  29. 6ef26656  SELECT MIN(chn.name) AS voiced_char_name, MIN(n.name) AS voicin…  (1 call)
+     100 ms → 58.7 ms (−42%) with "no parallel workers"
+     Plan: Index Scan on info_type, Index Scan on role_type → Seq Scan on role_type, Seq Scan on info_type
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  30. 92588c28  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx.info) AS movie_…  (1 call)
+     4,580 ms → 3,628 ms (−21%) with "no nested loop"
+     Plan: Nested Loop ×8, Bitmap Heap Scan on movie_keyword, Index Scan on movie_info_idx, Index Scan on movie_info, Index Scan on cast_info, Index Scan on name, Index Scan on title → Hash Join ×8, Seq Scan on title, Seq Scan on name, Seq Scan on cast_info, Seq Scan on movie_info_idx, Seq Scan on movie_info, Seq Scan on movie_keyword
+       SET LOCAL enable_nestloop = off;
+
+  31. 2066cfd6  SELECT MIN(chn.name) AS character_name, MIN(mi_idx.info) AS rat…  (1 call)
+     18,311 ms → 517 ms (−97%) with "no index scan"
+     Plan: Hash Join ×2, Seq Scan on complete_cast, Index Scan on movie_info_idx, Index Scan on title, Index Scan on cast_info, Index Scan on name, Index Scan on movie_keyword, Index Scan on keyword, Index Scan on char_name → Nested Loop ×2, Seq Scan on keyword, Bitmap Heap Scan on movie_keyword, Bitmap Heap Scan on movie_info_idx, Bitmap Heap Scan on title, Bitmap Heap Scan on complete_cast, Bitmap Heap Scan on cast_info, Bitmap Heap Scan on char_name, Bitmap Heap Scan on name
+       SET LOCAL enable_indexscan = off;
+       SET LOCAL enable_indexonlyscan = off;
+
+  32. 188e45da  SELECT MIN(cn.name) AS producing_company, MIN(lt.link) AS link_…  (1 call)
+     71.7 ms → 54.1 ms (−25%) with "nested loop only"
+     Plan: Hash Join ×3, Merge Join, Seq Scan on comp_cast_type → Nested Loop ×4, Memoize, Index Scan on comp_cast_type
+       SET LOCAL enable_hashjoin = off;
+       SET LOCAL enable_mergejoin = off;
+
+  33. 4a1dc513  SELECT MIN(cn.name) AS producing_company, MIN(lt.link) AS link_…  (1 call)
+     61.4 ms → 43.8 ms (−29%) with "no memoize"
+     Plan: Nested Loop, Memoize, Index Scan on company_type → Hash Join, Seq Scan on company_type
+       SET LOCAL enable_memoize = off;
+
+  34. c862384f  SELECT MIN(cn.name) AS producing_company, MIN(lt.link) AS link_…  (1 call)
+     79.6 ms → 50.4 ms (−37%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  35. b26e54ae  SELECT MIN(cn.name) AS movie_company, MIN(mi_idx.info) AS ratin…  (1 call)
+     820 ms → 294 ms (−64%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  36. e4943b34  SELECT MIN(cn.name) AS movie_company, MIN(mi_idx.info) AS ratin…  (1 call)
+     335 ms → 226 ms (−33%) with "no memoize"
+     Plan: same joins and scans
+       SET LOCAL enable_memoize = off;
+
+  37. 05ae6e9d  SELECT MIN(chn.name) AS voiced_char, MIN(n.name) AS voicing_act…  (1 call)
+     95.2 ms → 69.5 ms (−27%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
+
+  38. 631a5812  SELECT MIN(chn.name) AS voiced_char, MIN(n.name) AS voicing_act…  (1 call)
+     682 ms → 147 ms (−79%) with "nested loop only"
+     Plan: same joins and scans
+       SET LOCAL enable_hashjoin = off;
+       SET LOCAL enable_mergejoin = off;
+
+  39. c213f9bf  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx.info) AS movie_…  (1 call)
+     3,286 ms → 653 ms (−80%) with "no bitmap scan"
+     Plan: Bitmap Heap Scan on movie_keyword → Index Scan on movie_keyword
+       SET LOCAL enable_bitmapscan = off;
+
+  40. 311123fe  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx.info) AS movie_…  (1 call)
+     138 ms → 94.1 ms (−32%) with "row counts"
+     Plan: Nested Loop, Index Scan on info_type → Hash Join, Memoize, Seq Scan on info_type
+       /*+ Rows(cn mc *68) Rows(cn mc mi_idx *100) Rows(cn it2 mc mi_idx *67) Rows(cn it2 mc mi_idx t *7) Rows(cn it2 mc mi_idx mk t *890) Rows(ci cn it2 mc mi_idx mk t *1600) Rows(ci cn it2 mc mi mi_idx mk t *2700) Rows(ci cn it1 it2 mc mi mi_idx mk t *2700) Rows(ci cn it1 it2 k mc mi mi_idx mk t *84) Rows(ci cn it1 it2 k mc mi mi_idx mk n t *84) */ -- at the start of the query, with pg_hint_plan
+
+  41. ddcd52ba  SELECT MIN(cn1.name) AS first_company, MIN(cn2.name) AS second_…  (1 call)
+     89.8 ms → 58.2 ms (−35%) with "nested loop only"
+     Plan: Hash Join ×3, Merge Join, Seq Scan on movie_link, Seq Scan on kind_type → Nested Loop ×4, Index Scan on kind_type, Bitmap Heap Scan on movie_link
+       SET LOCAL enable_hashjoin = off;
+       SET LOCAL enable_mergejoin = off;
+
+  42. 6744415b  SELECT MIN(cn1.name) AS first_company, MIN(cn2.name) AS second_…  (1 call)
+     81.9 ms → 51.4 ms (−37%) with "nested loop only"
+     Plan: Hash Join ×2, Merge Join → Nested Loop ×3, Memoize
+       SET LOCAL enable_hashjoin = off;
+       SET LOCAL enable_mergejoin = off;
+
+  43. 0da43d7b  SELECT MIN(cn1.name) AS first_company, MIN(cn2.name) AS second_…  (1 call)
+     87.7 ms → 66.0 ms (−25%) with "no merge join"
+     Plan: Hash Join, Merge Join, Index Scan on kind_type ×2 → Nested Loop ×2, Seq Scan on kind_type ×2
+       SET LOCAL enable_mergejoin = off;
+
+Keep the default plan: 51
+
+  653a69e1  SELECT MIN(t.title) AS movie_title FROM keyword…   100.0 ms  no other plan was clearly faster
+  bcfea86c  SELECT MIN(mi_idx.info) AS rating, MIN(t.title)…    67.4 ms  no other plan was clearly faster
+  fbf68f9d  SELECT MIN(k.keyword) AS movie_keyword, MIN(n.n…    9.37 ms  no other plan was clearly faster
+  e5a4de69  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…     550 ms  no other plan was clearly faster
+  27998f6b  SELECT MIN(k.keyword) AS movie_keyword, MIN(n.n…   1,488 ms  a hint helped one sample but was slower on another
+  0ea80b8e  SELECT MIN(an.name) AS cool_actor_pseudonym, MI…     449 ms  no other plan was clearly faster
+  11d2f26e  SELECT MIN(cn.name) AS company_name, MIN(lt.lin…    58.8 ms  no other plan was clearly faster
+  3564c7a4  SELECT MIN(lt.link) AS link_type, MIN(t1.title)…    38.5 ms  no other plan was clearly faster
+  8f7394ec  SELECT MIN(t.title) AS typical_european_movie F…     142 ms  no other plan was clearly faster
+  c3f27144  SELECT MIN(t.title) AS american_vhs_movie FROM …     135 ms  no other plan was clearly faster
+  c936eca9  SELECT MIN(t.title) AS american_movie FROM comp…     173 ms  no other plan was clearly faster
+  3d48869d  SELECT MIN(k.keyword) AS movie_keyword, MIN(n.n…   2,895 ms  no other plan was clearly faster
+  376e1e8f  SELECT MIN(an1.name) AS actress_pseudonym, MIN(…     718 ms  no other plan was clearly faster
+  5d5082e3  SELECT MIN(an.name) AS acress_pseudonym, MIN(t.…     163 ms  no other plan was clearly faster
+  5671211f  SELECT MIN(a1.name) AS writer_pseudo_name, MIN(…   2,969 ms  no other plan was clearly faster
+  e80417f5  SELECT MIN(an1.name) AS costume_designer_pseudo…   1,057 ms  no other plan was clearly faster
+  4a51ac6c  SELECT MIN(an.name) AS alternative_name, MIN(ch…     264 ms  no other plan was clearly faster
+  2a882a48  SELECT MIN(an.name) AS alternative_name, MIN(ch…     261 ms  no other plan was clearly faster
+  dd477274  SELECT MIN(an.name) AS alternative_name, MIN(ch…     422 ms  no other plan was clearly faster
+  39b4cff4  SELECT MIN(an.name) AS alternative_name, MIN(ch…   2,436 ms  no other plan was clearly faster
+  d468dc0f  SELECT MIN(cn.name) AS from_company, MIN(lt.lin…    23.6 ms  no other plan was clearly faster
+  46c94c7f  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…     172 ms  no other plan was clearly faster
+  fc50c266  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…     486 ms  no other plan was clearly faster
+  06df28fb  SELECT MIN(cn.name) AS producing_company, MIN(m…   1,549 ms  no other plan was clearly faster
+  ccc29962  SELECT MIN(mi_idx.info) AS rating, MIN(t.title)…     162 ms  no other plan was clearly faster
+  e14ae77f  SELECT MIN(mi_idx.info) AS rating, MIN(t.title)…    68.4 ms  no other plan was clearly faster
+  c56fadd6  SELECT MIN(mi_idx.info) AS rating, MIN(t.title)…     330 ms  no other plan was clearly faster
+  ef249dc4  SELECT MIN(mi.info) AS release_date, MIN(t.titl…     260 ms  no other plan was clearly faster
+  407c64ff  SELECT MIN(mi.info) AS release_date, MIN(t.titl…    32.7 ms  no other plan was clearly faster
+  a05671a4  SELECT MIN(mi.info) AS release_date, MIN(t.titl…     364 ms  no other plan was clearly faster
+  5cce4f36  SELECT MIN(an.name) AS cool_actor_pseudonym, MI…     970 ms  no other plan was clearly faster
+  43101882  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…     167 ms  no other plan was clearly faster
+  86f7e26b  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…   2,937 ms  no other plan was clearly faster
+  e27f8ea2  SELECT MIN(n.name) AS voicing_actress, MIN(t.ti…     283 ms  no other plan was clearly faster
+  2ec85d5d  SELECT MIN(n.name) AS voicing_actress, MIN(t.ti…     164 ms  no other plan was clearly faster
+  fa4f3af1  SELECT MIN(n.name) AS voicing_actress, MIN(t.ti…     431 ms  no other plan was clearly faster
+  8ed005c6  SELECT MIN(t.title) AS complete_downey_ironman_…   1,440 ms  no other plan was clearly faster
+  e61f5cbd  SELECT MIN(t.title) AS complete_downey_ironman_…   1,195 ms  no other plan was clearly faster
+  c9d70fe1  SELECT MIN(n.name) AS cast_member, MIN(t.title)…     621 ms  no other plan was clearly faster
+  45290f03  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…     550 ms  no other plan was clearly faster
+  3f5cfdf1  SELECT MIN(kt.kind) AS movie_kind, MIN(t.title)…    60.7 ms  no other plan was clearly faster
+  c335bb2c  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…   1,636 ms  no other plan was clearly faster
+  0466dcec  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…     209 ms  no other plan was clearly faster
+  135e5bc8  SELECT MIN(chn.name) AS character_name, MIN(mi_…     113 ms  no other plan was clearly faster
+  7483ed43  SELECT MIN(chn.name) AS character_name, MIN(mi_…   1,665 ms  no other plan was clearly faster
+  4e8b8a70  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…     264 ms  no other plan was clearly faster
+  ff8164ee  SELECT MIN(chn.name) AS voiced_char, MIN(n.name…    97.4 ms  no other plan was clearly faster
+  929552c1  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…     309 ms  no other plan was clearly faster
+  2b1949c5  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…   1,719 ms  no other plan was clearly faster
+  376fabaf  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…     204 ms  no other plan was clearly faster
+  442faf79  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…     299 ms  no other plan was clearly faster
+
+Estimated time for one pass of the tested statements: 133,103 ms now, 69,825 ms with these hints (−48%).
+Times are planning plus execution, as EXPLAIN ANALYZE reports them, median of 3 runs per plan.
