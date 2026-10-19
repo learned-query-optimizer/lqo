@@ -544,6 +544,8 @@ func (l *Learner) update(e *state.Learned, sr advisor.SampleResult, arms []hints
 				st.Suspect, st.SuspectWhy = "", ""
 			}
 			observe(st, math.Log(ratio), ratio)
+			st.SumMs += at.Ms
+			st.SumBaseMs += sr.BaseMs
 			slowest := 0.0
 			for _, v := range at.Runs {
 				slowest = max(slowest, v)
@@ -586,8 +588,12 @@ func (l *Learner) provable(st *state.Arm) bool {
 	if st.Out != "" || st.Suspect != "" || st.N < l.opt.MinObs || st.Wins < 1 || st.N == st.SamePlan {
 		return false
 	}
-	target := math.Log(1 - l.opt.MinGain)
-	return st.Mean <= target && st.Mean+z*se(st) <= math.Log(1-l.opt.MinGain/2) && st.MaxRatio <= 1+l.opt.Tolerance
+	// Saves MinGain of the time over the texts, added up as lqo advise
+	// adds them, and is confidently faster on each text, on average.
+	if st.SumBaseMs <= 0 || st.SumMs > st.SumBaseMs*(1-l.opt.MinGain) {
+		return false
+	}
+	return st.Mean+z*se(st) <= math.Log(1-l.opt.MinGain/2) && st.MaxRatio <= 1+l.opt.Tolerance
 }
 
 // settle proves the best provable hint, or decides the shape has none, or
@@ -624,9 +630,9 @@ func (l *Learner) settle(e *state.Learned, arms []hints.Arm) {
 				l.stats.Proven++
 			}
 			e.Status, e.Reason, e.Proven, e.ProvenAt = Proven, "", best, time.Now().UTC()
-			l.opt.Logf("proven: %s %s with %q, %.0f%% faster", e.Database, e.ID[:8], best, (1-math.Exp(e.Arms[best].Mean))*100)
+			l.opt.Logf("proven: %s %s with %q, %.0f%% faster", e.Database, e.ID[:8], best, (1-e.Arms[best].SumMs/e.Arms[best].SumBaseMs)*100)
 		}
-		e.Gain = 1 - math.Exp(e.Arms[best].Mean)
+		e.Gain = 1 - e.Arms[best].SumMs/e.Arms[best].SumBaseMs
 		return
 	}
 	if e.Status == Proven {

@@ -447,3 +447,17 @@ func TestReplicaLossPausesLearningOnly(t *testing.T) {
 		t.Errorf("Run: %v", err)
 	}
 }
+
+// The gain is judged over the texts' times added up, as lqo advise does:
+// a hint that halves a quick text and barely touches the long ones doesn't
+// save 20% of the time.
+func TestGainIsOverSummedTimes(t *testing.T) {
+	l := newTestLearner()
+	e := newShape(l)
+	for _, c := range []struct{ base, r float64 }{{100, 0.79}, {1000, 0.82}, {1000, 0.82}, {1000, 0.82}} {
+		l.update(e, sample(c.base, map[string]float64{"good": c.r}), testArms)
+	}
+	if e.Status == Proven {
+		t.Errorf("proven at %.0f%% of the summed time", 100*e.Arms["good"].SumMs/e.Arms["good"].SumBaseMs)
+	}
+}

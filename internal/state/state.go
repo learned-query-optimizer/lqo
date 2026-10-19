@@ -72,6 +72,10 @@ type Arm struct {
 	SamePlan int     `json:"same_plan"`
 	Texts    int     `json:"texts"`
 	Out      string  `json:"ruled_out,omitempty"`
+	// The hint's medians and the default plan's, added up over the texts
+	// timed, as lqo advise adds them: its gain is 1 - SumMs/SumBaseMs.
+	SumMs     float64 `json:"sum_ms,omitempty"`
+	SumBaseMs float64 `json:"sum_base_ms,omitempty"`
 	// Suspect is a text on which the hint looked slower, or timed out,
 	// once. A replica busy with other work can make one round look bad,
 	// so the hint is tried on that text again before it is ruled out.

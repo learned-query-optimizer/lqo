@@ -283,9 +283,10 @@ What a result does to a hint:
 
 A hint is proven when it isn't ruled out or waiting for a second look, has at
 least 3 results, beat every run of the default plan with its slowest run on at
-least one text, has an average ratio at most 1 − `--min-gain`, has no result over
-1 + tolerance, and the upper end of its 95% one-sided interval is at most
-1 − half of `--min-gain`. Between proven hints the faster wins; within 2%, the
+least one text, has no result over 1 + tolerance, saves at least `--min-gain` of
+the time with its medians and the default plan's added up over the texts, as
+`lqo advise` adds them, and the upper end of the 95% one-sided interval of its
+mean log ratio is at most the log of 1 − half of `--min-gain`. Between proven hints the faster wins; within 2%, the
 one with fewer settings. A shape whose hints are all ruled out, or all
 confidently save less than `--min-gain`, is marked `keep` and tried again a day
 later. A proven hint keeps being checked on new texts now and then, and loses its

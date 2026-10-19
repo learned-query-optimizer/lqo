@@ -316,7 +316,8 @@ a guess from each, and tries the best guesses. Hints that keep winning get tried
 more, hints that lose stop being tried, and untried hints still get a turn. A hint
 is proven only by the same rule as `lqo advise`, on at least three texts: never
 more than 10% slower on any, the same rows, no time-outs, faster than every run of
-the default plan at least once, and 20% faster on average, with enough certainty.
+the default plan at least once, and saving 20% of the time over the texts tried,
+with enough certainty.
 A bad result on one text is tried again before it counts, because a replica busy
 with other work can make one round look bad. A proven hint that fails a later
 check loses its standing.
