@@ -88,19 +88,19 @@ a report like this one, from the recorded run in
 Faster with a hint: 2 of 5 tested
 
   1. 891f0819  SELECT sum(l.qty) FROM lqo_demo.customers c JOIN lqo_demo.order…  (2 calls)
-     1,061 ms → 684 ms (−36%) with "no nested loop"
+     1,308 ms → 960 ms (−27%) with "no nested loop"
      Plan: Nested Loop ×2, Bitmap Heap Scan on orders, Index Scan on order_lines → Hash Join ×2, Seq Scan on order_lines, Seq Scan on orders
        SET LOCAL enable_nestloop = off;
 
   2. 6c73a7a6  SELECT id, created_at FROM lqo_demo.customers WHERE attrs->>'ti…  (1 call)
-     35.1 ms → 24.7 ms (−30%) with "no index scan"
+     45.9 ms → 29.0 ms (−37%) with "no index scan"
      Plan: Index Scan on customers → Seq Scan on customers
        SET LOCAL enable_indexscan = off;
        SET LOCAL enable_indexonlyscan = off;
 ```
 
-The second one is a borderline case: on some runs its timings overlap and LQO
-keeps the default plan instead. That's the rule working as meant.
+Times depend on the machine. On a slower or busier one the margins move, and LQO
+reports only a hint that clears them every time.
 
 The demo's workload file explains each query and why LQO should or shouldn't touch
 it. One of them is a query where switching off index scans would make one of its
@@ -295,17 +295,18 @@ only needs the server's address and TLS settings; `--replica` needs a login, lik
 
 The status page, on `http://127.0.0.1:6434/` by default, shows what it has seen and
 learned, and `/status` has the same as JSON. `lqo show` reads it from the state
-file afterwards.
+file afterwards. This is the recorded run on the demo, from
+[test/results/serve/demo.txt](test/results/serve/demo.txt), five minutes in:
 
 ```
-lqo 0.2.0, shadow mode, up 2h13m
-connections: 14 open, 2,210 in all
-statements measured: 1,904,227 in 212 shapes
-learning: 96 rounds, 288 hint trials, replica busy 31m, 3 proven
+lqo 0.2.0, shadow mode, up 5m26s
+connections: 0 open, 15 in all
+statements measured: 45 in 2 shapes
+learning: 4 rounds, 16 hint trials, replica busy 1m32s, 1 proven
 
-891f0819  shop  SELECT sum(l.qty) FROM customers c JOIN orders o ON …
-  1,204 calls, 1,288,280 ms in all, median 1,061 ms, p95 1,640 ms
-  proven: "no nested loop", about 36% faster on the replica
+891f0819  lqo_test  SELECT sum(l.qty) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON…
+  30 calls, 44,276 ms in all, median 1,202 ms, p95 2,859 ms
+  proven: "no nested loop", about 22% faster on the replica
     SET LOCAL enable_nestloop = off;
 ```
 
@@ -323,9 +324,13 @@ with other work can make one round look bad. A proven hint that fails a later
 check loses its standing.
 
 **What it costs.** The learner keeps the replica busy at most a quarter of the time
-(`--budget`). The proxy adds a little time to every query, mostly the extra network
-hop: [test/results/serve/overhead.txt](test/results/serve/overhead.txt) has the
-measurements. Measuring never holds traffic up: if LQO falls behind, it drops
+(`--budget`). The proxy adds time to every query, mostly the extra hop. On the
+two-core test machine, shared by pgbench, PostgreSQL and LQO, a one-row indexed
+SELECT took 0.16 ms straight and 0.48 ms through LQO with prepared statements, and
+0.26 ms against 0.70 ms with plain queries
+([test/results/serve/overhead.txt](test/results/serve/overhead.txt)). With LQO on
+its own cores, or next to the application, the cost is lower; measure it on yours
+before you rely on it. Measuring never holds traffic up: if LQO falls behind, it drops
 measurements, never queries.
 
 **What it changes: nothing.** 0.2 runs in shadow mode only. Applying proven hints

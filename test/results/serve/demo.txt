@@ -1,23 +1,42 @@
 # lqo serve learning from live traffic: the demo's trap query (two texts)
-# and a key lookup, sent through LQO by psql every 5 seconds; the
-# same server stands in for the replica (--allow-primary)
-# recorded 2026-10-19 03:37 UTC, lqo 0.1.0
+# and a key lookup, sent through LQO by psql every 5 seconds for the
+# first two minutes; the same server stands in for the replica
+# (--allow-primary), with the default 25% budget
+# recorded 2026-10-19 06:25 UTC, lqo 0.2.0
 # Linux 6.18.44-fc-v139, Intel(R) Xeon(R) Processor @ 2.80GHz, 2 CPUs
 # server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
 # LQO, pgbench and PostgreSQL share this machine, so every one of them
 # takes CPU from the others; on separate machines the cost is lower.
-# first hint proven after: 393 s
+# traffic for 15 minutes; first hint proven after: 327 s
 
-lqo 0.1.0, shadow mode, up 6m33s
-connections: 0 open, 49 in all
-statements measured: 147 in 2 shapes
-learning: 7 rounds, 21 hint trials, replica busy 1m46s, 1 proven
+## When the first hint was proven
+
+lqo 0.2.0, shadow mode, up 5m26s
+connections: 0 open, 15 in all
+statements measured: 45 in 2 shapes
+learning: 4 rounds, 16 hint trials, replica busy 1m32s, 1 proven
 
 891f0819  lqo_test  SELECT sum(l.qty) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON…
-  95 calls, 142,436 ms in all, median 1,429 ms, p95 4,043 ms
-  proven: "no bitmap scan", about 21% faster on the replica
-    SET LOCAL enable_bitmapscan = off;
+  30 calls, 44,276 ms in all, median 1,202 ms, p95 2,859 ms
+  proven: "no nested loop", about 22% faster on the replica
+    SET LOCAL enable_nestloop = off;
 
 5fcb12e3  lqo_test  SELECT c.id, count(*), sum(l.qty) FROM lqo_demo.customers c JOIN lqo_…
-  47 calls, 40.8 ms in all, median 0.70 ms, p95 0.99 ms
+  15 calls, 13.0 ms in all, median 0.70 ms, p95 2.8 ms
+  learning: not tried yet
+
+## After 15 minutes
+
+lqo 0.2.0, shadow mode, up 15m3s
+connections: 0 open, 15 in all
+statements measured: 45 in 2 shapes
+learning: 11 rounds, 44 hint trials, replica busy 3m54s, 1 proven
+
+891f0819  lqo_test  SELECT sum(l.qty) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON…
+  30 calls, 44,276 ms in all, median 1,202 ms, p95 2,859 ms
+  proven: "no nested loop", about 22% faster on the replica
+    SET LOCAL enable_nestloop = off;
+
+5fcb12e3  lqo_test  SELECT c.id, count(*), sum(l.qty) FROM lqo_demo.customers c JOIN lqo_…
+  15 calls, 13.0 ms in all, median 0.70 ms, p95 2.8 ms
   learning: not tried yet

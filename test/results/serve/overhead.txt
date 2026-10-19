@@ -1,21 +1,21 @@
 # lqo serve overhead: pgbench -S (one indexed SELECT per transaction),
-# 8 clients for 5s each, measuring only (no --replica)
-# recorded 2026-10-19 03:30 UTC, lqo 0.1.0
+# 8 clients for 20s each, measuring only (no --replica)
+# recorded 2026-10-19 06:08 UTC, lqo 0.2.0
 # Linux 6.18.44-fc-v139, Intel(R) Xeon(R) Processor @ 2.80GHz, 2 CPUs
 # server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
 # LQO, pgbench and PostgreSQL share this machine, so every one of them
 # takes CPU from the others; on separate machines the cost is lower.
 
 simple protocol
-  straight to the server: 30196.352761 tps, 0.265 ms average latency
-  through lqo serve:      11775.635436 tps, 0.679 ms average latency
+  straight to the server: 30428.069443 tps, 0.263 ms average latency
+  through lqo serve:      11418.852011 tps, 0.701 ms average latency
 extended protocol
-  straight to the server: 24606.677587 tps, 0.325 ms average latency
-  through lqo serve:      12200.860331 tps, 0.656 ms average latency
+  straight to the server: 25512.695239 tps, 0.314 ms average latency
+  through lqo serve:      11862.171544 tps, 0.674 ms average latency
 prepared protocol
-  straight to the server: 50942.443605 tps, 0.157 ms average latency
-  through lqo serve:      16805.934687 tps, 0.476 ms average latency
+  straight to the server: 49964.280519 tps, 0.160 ms average latency
+  through lqo serve:      16663.221417 tps, 0.480 ms average latency
 
   "connections_total": 27,
-  "statements": 200943,
+  "statements": 795959,
   "dropped": 0,
