@@ -682,10 +682,13 @@ func (l *Learner) Save() error {
 	return nil
 }
 
-// Shapes copies the learned shapes, proven first, then by live time.
+// Shapes copies the learned shapes, proven first, then by live time, with
+// the live counts brought up to date.
 func (l *Learner) Shapes() []state.Learned {
+	live := l.col.Snapshot()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.sync(live)
 	out := make([]state.Learned, 0, len(l.file.Serve))
 	for _, e := range l.file.Serve {
 		cp := *e

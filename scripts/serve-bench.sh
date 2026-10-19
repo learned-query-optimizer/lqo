@@ -94,13 +94,16 @@ while [ $(( $(date +%s) - start )) -lt $(( minutes * 60 )) ]; do
 		proven=$(( $(date +%s) - start ))
 		curl -s "http://$status/" > "$work/first.txt"
 	fi
-	sleep 5
+	# Busy for two minutes, to give the learner texts and times; then
+	# quieter, since here the "replica" is this same busy machine.
+	if [ $(( $(date +%s) - start )) -lt 120 ]; then sleep 5; else sleep 30; fi
 done
 curl -s "http://$status/status" > "$out/demo.json"
 {
 	echo "# lqo serve learning from live traffic: the demo's trap query (two texts)"
-	echo "# and a key lookup, sent through LQO by psql every 5 seconds; the"
-	echo "# same server stands in for the replica (--allow-primary)"
+	echo "# and a key lookup, sent through LQO by psql every 5 seconds for two"
+	echo "# minutes, then every 30 seconds; the same server stands in for the"
+	echo "# replica (--allow-primary), with the default 25% budget"
 	machine
 	echo "# traffic for $minutes minutes; first hint proven after: ${proven:-never} s"
 	echo
