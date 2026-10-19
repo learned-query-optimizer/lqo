@@ -27,6 +27,51 @@ type File struct {
 	Format  int               `json:"format"`
 	Updated time.Time         `json:"updated"`
 	Shapes  map[string]*Entry `json:"shapes"`
+	// Serve is what lqo serve has learned from live traffic, by database
+	// and shape ID. lqo advise leaves it alone.
+	Serve map[string]*Learned `json:"serve,omitempty"`
+}
+
+// Learned is what the proxy knows about one shape it has seen live.
+type Learned struct {
+	Key        string    `json:"key"`
+	ID         string    `json:"id"`
+	Database   string    `json:"database"`
+	Normalized string    `json:"normalized"`
+	Example    string    `json:"example,omitempty"`
+	Calls      int64     `json:"calls"`
+	TotalMs    float64   `json:"total_ms"`
+	P50Ms      float64   `json:"p50_ms"`
+	P95Ms      float64   `json:"p95_ms"`
+	LastSeen   time.Time `json:"last_seen"`
+	Status     string    `json:"status"` // learning, proven, keep, skipped, error
+	Reason     string    `json:"reason,omitempty"`
+	Rounds     int       `json:"rounds"`
+	Texts      int       `json:"texts_tried"`
+	Failures   int       `json:"failures,omitempty"`
+	LastTried  time.Time `json:"last_tried,omitempty"`
+	BaselineMs float64   `json:"baseline_ms,omitempty"`
+	// Proven is the hint that passed, with its settings, when Status is
+	// proven.
+	Proven   string          `json:"proven,omitempty"`
+	Settings []hints.Setting `json:"settings,omitempty"`
+	Gain     float64         `json:"gain,omitempty"`
+	ProvenAt time.Time       `json:"proven_at,omitempty"`
+	Disabled bool            `json:"disabled,omitempty"` // switched off by hand
+	Arms     map[string]*Arm `json:"arms,omitempty"`
+}
+
+// Arm is the evidence for one hint on one shape. Each observation is one
+// text: the hint's median time over the default plan's, as a log ratio.
+type Arm struct {
+	N        int     `json:"n"`
+	Mean     float64 `json:"mean_log_ratio"`
+	M2       float64 `json:"m2"`
+	MaxRatio float64 `json:"max_ratio"`
+	Wins     int     `json:"strict_wins"`
+	SamePlan int     `json:"same_plan"`
+	Texts    int     `json:"texts"`
+	Out      string  `json:"ruled_out,omitempty"`
 }
 
 // Entry is the latest finding for one query shape.
@@ -49,7 +94,9 @@ type Entry struct {
 }
 
 // New is an empty state.
-func New() *File { return &File{Format: FormatVersion, Shapes: map[string]*Entry{}} }
+func New() *File {
+	return &File{Format: FormatVersion, Shapes: map[string]*Entry{}, Serve: map[string]*Learned{}}
+}
 
 // ErrCorrupt means the file exists but can't be read as a state file.
 var ErrCorrupt = errors.New("the state file is damaged")
@@ -72,6 +119,9 @@ func Load(path string) (*File, error) {
 	}
 	if f.Shapes == nil {
 		f.Shapes = map[string]*Entry{}
+	}
+	if f.Serve == nil {
+		f.Serve = map[string]*Learned{}
 	}
 	return &f, nil
 }

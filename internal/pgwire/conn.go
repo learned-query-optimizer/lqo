@@ -733,3 +733,16 @@ func (c *Conn) Close() error {
 	c.netConn = nil
 	return err
 }
+
+// DialServer opens a connection to the server in cfg and, as cfg's sslmode
+// asks, switches it to TLS, but sends nothing else: no startup message and
+// no login. The proxy uses it to reach the real server and then relays the
+// client's own startup and login. It reports whether TLS is in use.
+func DialServer(ctx context.Context, cfg *Config) (net.Conn, bool, error) {
+	c := &Conn{cfg: cfg}
+	nc, err := c.dial(ctx, cfg.SSLMode != "disable" && cfg.SSLMode != "allow")
+	if err != nil {
+		return nil, false, err
+	}
+	return nc, c.usedTLS, nil
+}

@@ -317,6 +317,34 @@ func Code(sql string) []Token {
 	return out
 }
 
+// trimEnd drops semicolons at the end of a statement's code: "SELECT 1;"
+// is one statement, the same as "SELECT 1".
+func trimEnd(code []Token) []Token {
+	for len(code) > 0 && code[len(code)-1].Kind == Op && code[len(code)-1].Text == ";" {
+		code = code[:len(code)-1]
+	}
+	return code
+}
+
+// TrimEnd drops semicolons, spaces and comments at the end of a statement.
+func TrimEnd(sql string) string {
+	toks := Lex(sql)
+	end := len(toks)
+	for end > 0 {
+		t := toks[end-1]
+		if t.Kind == Space || t.Kind == Comment || (t.Kind == Op && t.Text == ";") {
+			end--
+			continue
+		}
+		break
+	}
+	var b strings.Builder
+	for _, t := range toks[:end] {
+		b.WriteString(t.Text)
+	}
+	return b.String()
+}
+
 // TrimLeadingComments drops comments and spaces before a statement's first
 // token, such as the notes a SQL file puts above each query.
 func TrimLeadingComments(sql string) string {

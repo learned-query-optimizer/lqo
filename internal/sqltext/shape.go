@@ -17,7 +17,7 @@ import (
 // A list of values inside IN (...) or ARRAY[...] becomes a single ?...,
 // however long it was.
 func Normalize(sql string) string {
-	code := Code(sql)
+	code := trimEnd(Code(sql))
 	parts := make([]string, 0, len(code))
 	for i, t := range code {
 		switch t.Kind {
@@ -194,8 +194,15 @@ func deniedCall(name string, code []Token, i int) string {
 
 // Classify decides whether LQO may run a statement. It returns "" when the
 // statement is a plain read, or the reason it will be skipped.
-func Classify(sql string) string {
-	code := Code(sql)
+func Classify(sql string) string { return classify(sql, false) }
+
+// ClassifyTemplate is Classify for a statement whose $n parameters will be
+// filled in with values before it runs, such as a prepared statement seen by
+// the proxy.
+func ClassifyTemplate(sql string) string { return classify(sql, true) }
+
+func classify(sql string, paramsOK bool) string {
+	code := trimEnd(Code(sql))
 	if len(code) == 0 {
 		return "empty statement"
 	}
@@ -219,7 +226,9 @@ func Classify(sql string) string {
 	for i, t := range code {
 		switch t.Kind {
 		case Param:
-			return fmt.Sprintf("it has a parameter with no value (%s)", t.Text)
+			if !paramsOK {
+				return fmt.Sprintf("it has a parameter with no value (%s)", t.Text)
+			}
 		case Word:
 			w := strings.ToLower(t.Text)
 			if changes[w] && !(w == "update" && i > 0 && strings.EqualFold(code[i-1].Text, "for")) {

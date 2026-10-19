@@ -180,6 +180,8 @@ type SampleResult struct {
 	BaseSteps []string    `json:"baseline_plan"`
 	Arms      []ArmTiming `json:"arms"`
 	Error     string      `json:"error,omitempty"`
+
+	BaseRowsVary bool `json:"-"`
 }
 
 // ArmTiming is one arm on one sample.
@@ -191,6 +193,7 @@ type ArmTiming struct {
 	Runs     []float64 `json:"runs,omitempty"`
 	TimedOut bool      `json:"timed_out,omitempty"`
 	Rows     float64   `json:"rows,omitempty"`
+	RowsVary bool      `json:"-"`
 	Error    string    `json:"error,omitempty"`
 }
 
@@ -694,6 +697,47 @@ func errTimeoutLike(s string) error {
 // sample plans the text under every arm, then times each distinct plan.
 // groups[0] is always the default plan.
 func (a *Advisor) sample(ctx context.Context, text string, wantQueryID bool, r *ShapeResult) (SampleResult, []*planGroup, error) {
+	return a.sampleArms(ctx, text, wantQueryID, r, nil)
+}
+
+// Arms lists the hint sets this advisor tries, after dropping those the
+// server lacks settings for. Trial takes indexes into it.
+func (a *Advisor) Arms() []hints.Arm { return a.opt.Arms }
+
+// Trial runs one text under the default plan and under the arms whose
+// indexes are in want, as lqo advise does for each sample of a shape: plan
+// each, then one warm-up and Repeat timed runs of each distinct plan, every
+// one in its own READ ONLY transaction that is rolled back. It checks
+// afterwards that no setting or advisory lock was left behind. The proxy's
+// learner uses it to try a few hints at a time.
+func (a *Advisor) Trial(ctx context.Context, text string, want []int) (SampleResult, error) {
+	set := map[int]bool{}
+	for _, i := range want {
+		set[i] = true
+	}
+	sr, groups, err := a.sampleArms(ctx, text, false, &ShapeResult{}, set)
+	if err != nil {
+		return sr, err
+	}
+	if len(groups) > 0 {
+		sr.BaseRowsVary = !allEqual(groups[0].rows)
+		for i := range sr.Arms {
+			for _, g := range groups {
+				for _, ai := range g.arms {
+					if ai >= 0 && a.opt.Arms[ai].Name == sr.Arms[i].Name {
+						sr.Arms[i].RowsVary = len(g.rows) > 0 && !allEqual(g.rows)
+					}
+				}
+			}
+		}
+	}
+	if a.conn.Broken() {
+		return sr, errors.New("lost the connection to the server")
+	}
+	return sr, a.checkNoLeak(ctx)
+}
+
+func (a *Advisor) sampleArms(ctx context.Context, text string, wantQueryID bool, r *ShapeResult, want map[int]bool) (SampleResult, []*planGroup, error) {
 	sr := SampleResult{Text: text}
 	// Plan only, no run: cheap, and tells which arms change the plan.
 	planTimeout := a.opt.MaxTime
@@ -718,6 +762,9 @@ func (a *Advisor) sample(ctx context.Context, text string, wantQueryID bool, r *
 	groups := []*planGroup{base}
 	byFP := map[string]*planGroup{base.fp: base}
 	for i := range a.opt.Arms {
+		if want != nil && !want[i] {
+			continue
+		}
 		e, err := a.trial(ctx, text, &a.opt.Arms[i], "plan", planTimeout)
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, ErrUnsafe) {

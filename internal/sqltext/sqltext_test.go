@@ -125,6 +125,8 @@ func TestClassify(t *testing.T) {
 		"SELECT lower(name), log(2, 8) FROM t",
 		"SELECT * FROM t WHERE name = 'insert into x'",
 		`SELECT "update" FROM t`,
+		"SELECT 1;",
+		"SELECT 1 ;  -- done",
 	}
 	for _, s := range ok {
 		if r := Classify(s); r != "" {
@@ -173,5 +175,20 @@ func TestTrimLeadingComments(t *testing.T) {
 	}
 	if TrimLeadingComments("-- only") != "" {
 		t.Error("a comment alone should trim to nothing")
+	}
+}
+
+func TestTrailingSemicolon(t *testing.T) {
+	if Fingerprint("SELECT a FROM t WHERE b = 1;") != Fingerprint("SELECT a FROM t WHERE b = 2") {
+		t.Error("a trailing semicolon changed the shape")
+	}
+	if got := TrimEnd("SELECT 1 ; -- x\n"); got != "SELECT 1" {
+		t.Errorf("TrimEnd: %q", got)
+	}
+	if ClassifyTemplate("SELECT * FROM t WHERE id = $1 FOR UPDATE") == "" {
+		t.Error("FOR UPDATE with a parameter allowed")
+	}
+	if r := ClassifyTemplate("SELECT * FROM t WHERE id = $1;"); r != "" {
+		t.Errorf("prepared read refused: %s", r)
 	}
 }
