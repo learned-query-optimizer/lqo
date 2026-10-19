@@ -213,9 +213,7 @@ func TestThompsonFavoursTheEvidence(t *testing.T) {
 	}
 	counts := map[int]int{}
 	for i := 0; i < 1000; i++ {
-		for _, a := range l.choose(e, testArms, "t") {
-			counts[a]++
-		}
+		counts[l.choose(e, testArms, "t")[0]]++
 	}
 	if counts[0] < 900 {
 		t.Errorf("the hint with the best evidence was picked %d times in 1000: %v", counts[0], counts)
@@ -231,7 +229,7 @@ func TestUntriedHintsGetTheirTurn(t *testing.T) {
 	e := newShape(l)
 	seen := map[int]bool{}
 	for i := 0; i < 50; i++ {
-		for _, a := range l.choose(e, testArms, "t") {
+		for _, a := range l.choose(e, testArms, "t")[:2] {
 			seen[a] = true
 		}
 	}

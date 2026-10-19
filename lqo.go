@@ -7,10 +7,11 @@
 // set of hints, against a replica or a copy, and keeping a hint only when it
 // is clearly and consistently faster.
 //
-// Version 0.1 is the advisor: the lqo command reads a workload, runs the
-// trials and reports. It changes nothing on the server. The code is in the
-// internal packages; the command is in cmd/lqo.
+// lqo advise reads a workload, runs the trials and reports. lqo serve, since
+// 0.2, runs as a proxy in front of the server, measures the live queries and
+// learns on a replica which hints help. Neither changes anything on the
+// server. The code is in the internal packages; the command is in cmd/lqo.
 package lqo
 
 // Version is the LQO release. The release workflow reads it from this line.
-const Version = "0.1.0"
+const Version = "0.2.0"

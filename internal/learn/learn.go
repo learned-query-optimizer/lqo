@@ -390,7 +390,7 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 	}
 
 	start := time.Now()
-	sr, err := r.adv.Trial(ctx, text, want)
+	sr, err := r.adv.Trial(ctx, text, want, l.opt.ArmsPerRound)
 	busy := time.Since(start)
 	if err != nil {
 		return true, err
@@ -398,7 +398,11 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.stats.Rounds++
-	l.stats.Trials += len(want)
+	for _, at := range sr.Arms {
+		if !at.Same {
+			l.stats.Trials++
+		}
+	}
 	l.stats.BusyMs += float64(busy.Microseconds()) / 1000
 	l.dirty = true
 	e.Rounds++
@@ -407,9 +411,11 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
-// choose draws from each eligible hint's evidence and returns the indexes
-// of the most promising draws. A proven shape always includes its hint, to
-// keep checking it on new texts.
+// choose draws from each eligible hint's evidence and returns every
+// eligible hint, the most promising draws first: hints due a second look on
+// this text, and a proven shape's hint, lead. The trial plans them all and
+// runs the first ArmsPerRound distinct plans; hints whose plan is the
+// default's are noted without a run.
 func (l *Learner) choose(e *state.Learned, arms []hints.Arm, text string) []int {
 	type cand struct {
 		i    int
@@ -439,9 +445,6 @@ func (l *Learner) choose(e *state.Learned, arms []hints.Arm, text string) []int 
 	}
 	sort.Slice(cands, func(x, y int) bool { return cands[x].draw < cands[y].draw })
 	for _, c := range cands {
-		if len(out) >= max(l.opt.ArmsPerRound, 1) {
-			break
-		}
 		out = append(out, c.i)
 	}
 	return out

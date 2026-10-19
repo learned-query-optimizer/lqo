@@ -412,13 +412,13 @@ func TestPsqlCopyAndTransactions(t *testing.T) {
 	via := tp.via(t, dsn, "disable")
 	script := `
 CREATE TEMP TABLE lqo_copy(id int, v text);
-COPY lqo_copy FROM STDIN WITH (FORMAT csv);
-1,one
-2,"two, with a comma"
-3,
+COPY lqo_copy FROM STDIN;
+1	one
+2	two, with a comma
+3	\N
 \.
 SELECT count(*) || ' ' || coalesce(string_agg(v, '|' ORDER BY id), '') FROM lqo_copy;
-COPY (SELECT id, v FROM lqo_copy ORDER BY id) TO STDOUT WITH (FORMAT csv);
+COPY (SELECT id, v FROM lqo_copy ORDER BY id) TO STDOUT;
 BEGIN;
 INSERT INTO lqo_copy VALUES (4, 'gone');
 ROLLBACK;
@@ -434,7 +434,7 @@ SELECT count(*) FROM lqo_copy;
 	if err != nil {
 		t.Fatalf("%v\n%s", err, b)
 	}
-	want := "3 one|two, with a comma\n1,one\n2,\"two, with a comma\"\n3,\n3"
+	want := "3 one|two, with a comma\n1\tone\n2\ttwo, with a comma\n3\t\\N\n3"
 	if got := strings.TrimSpace(strings.ReplaceAll(string(b), "BEGIN\nINSERT 0 1\nROLLBACK\n", "")); !strings.Contains(got, want) {
 		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}

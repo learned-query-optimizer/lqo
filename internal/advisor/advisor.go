@@ -202,6 +202,11 @@ type Advisor struct {
 	conn *pgwire.Conn
 	opt  Options
 	snap map[string]string
+
+	// For Trial: the order arms are worth running in, and how many
+	// distinct plans besides the default to run. Zero runs them all.
+	timeOrder []int
+	maxTimed  int
 }
 
 // New checks the server and prepares a run. It refuses a primary unless
@@ -704,17 +709,24 @@ func (a *Advisor) sample(ctx context.Context, text string, wantQueryID bool, r *
 // server lacks settings for. Trial takes indexes into it.
 func (a *Advisor) Arms() []hints.Arm { return a.opt.Arms }
 
-// Trial runs one text under the default plan and under the arms whose
-// indexes are in want, as lqo advise does for each sample of a shape: plan
-// each, then one warm-up and Repeat timed runs of each distinct plan, every
-// one in its own READ ONLY transaction that is rolled back. It checks
-// afterwards that no setting or advisory lock was left behind. The proxy's
-// learner uses it to try a few hints at a time.
-func (a *Advisor) Trial(ctx context.Context, text string, want []int) (SampleResult, error) {
+// Trial runs one text under the default plan and under the arms in want,
+// as lqo advise does for each sample of a shape: plan each, then one warm-up
+// and Repeat timed runs of each distinct plan, every one in its own READ
+// ONLY transaction that is rolled back. It checks afterwards that no setting
+// or advisory lock was left behind.
+//
+// Planning is cheap and running isn't, so every arm in want is planned, but
+// only the first maxTimed distinct plans other than the default, in want's
+// order, are run. Arms whose plan is the default's are reported as such
+// without costing a run. The proxy's learner uses it to try a few hints at a
+// time.
+func (a *Advisor) Trial(ctx context.Context, text string, want []int, maxTimed int) (SampleResult, error) {
 	set := map[int]bool{}
 	for _, i := range want {
 		set[i] = true
 	}
+	a.timeOrder, a.maxTimed = want, maxTimed
+	defer func() { a.timeOrder, a.maxTimed = nil, 0 }()
 	sr, groups, err := a.sampleArms(ctx, text, false, &ShapeResult{}, set)
 	if err != nil {
 		return sr, err
@@ -782,6 +794,32 @@ func (a *Advisor) sampleArms(ctx context.Context, text string, wantQueryID bool,
 		g := &planGroup{fp: fp, root: e.Plan, arms: []int{i}}
 		byFP[fp] = g
 		groups = append(groups, g)
+	}
+
+	// When only some plans are to be run, keep the default plan, the
+	// first maxTimed others in timeOrder, and the arms that gave the
+	// default plan; the rest aren't reported.
+	if a.maxTimed > 0 {
+		keep := map[*planGroup]bool{base: true}
+		n := 0
+		for _, ai := range a.timeOrder {
+			for _, g := range groups {
+				if keep[g] || !containsArm(g.arms, ai) {
+					continue
+				}
+				if n < a.maxTimed {
+					keep[g] = true
+					n++
+				}
+			}
+		}
+		var kept []*planGroup
+		for _, g := range groups {
+			if keep[g] {
+				kept = append(kept, g)
+			}
+		}
+		groups = kept
 	}
 
 	// Warm-up: one run of each plan, not counted. It also sets the time
@@ -985,4 +1023,13 @@ func appendOnce(list []string, s string) []string {
 		}
 	}
 	return append(list, s)
+}
+
+func containsArm(arms []int, i int) bool {
+	for _, a := range arms {
+		if a == i {
+			return true
+		}
+	}
+	return false
 }

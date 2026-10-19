@@ -19,6 +19,14 @@ with `--allow-primary`, a copy, and reports the hints that are clearly and
 consistently faster. It changes nothing on the server: every trial is EXPLAIN
 ANALYZE in a READ ONLY transaction with SET LOCAL, rolled back.
 
+v0.2.0 is `lqo serve` in shadow mode (October 2026): a PostgreSQL proxy
+(`internal/proxy`, port 6433, status page on 6434) that relays the wire protocol
+unchanged, measures every statement per shape (`internal/watch`), and with
+`--replica` learns per shape on the replica with Thompson sampling over the hints
+(`internal/learn`), proving a hint only under the advise rule. TLS from clients is
+ended at the proxy (it must see the queries), so SCRAM channel binding can't pass
+through; the proxy strips -PLUS and explains `channel_binding=disable`.
+
 The code is Go with no dependencies: `internal/pgwire` is LQO's own small
 PostgreSQL client (simple query protocol, trust/md5/SCRAM, TLS), because pgx and
 golang.org/x modules can't be fetched from a cloud session. Keep it
@@ -31,10 +39,13 @@ before changing behaviour. The decision rule in the reference is the contract.
 ## Test results
 
 `sh scripts/record-tests.sh` (with `LQO_TEST_DSN` set to a superuser on a test
-database) runs every test, the race detector, the smoke check and the demo
-benchmark, and writes them to `test/results/`. In a cloud session, Postgres 16 is
-in `/usr/lib/postgresql/16/bin`; run it as the `postgres` user from a directory
-that user can reach, such as `/srv`.
+database, and psql, pgbench and curl on the PATH) runs every test, the race
+detector, the smoke check, the demo benchmark and `scripts/serve-bench.sh` (proxy
+overhead with pgbench, and lqo serve learning the demo trap), and writes them to
+`test/results/`. Test packages run one at a time (`go test -p 1`), so timing
+tests don't share the server. Don't edit the code while it records. In a cloud
+session, Postgres 16 is in `/usr/lib/postgresql/16/bin`; run it as the `postgres`
+user from a directory that user can reach, such as `/srv`.
 
 The Join Order Benchmark needs the IMDB files from event.cwi.nl, which a cloud
 session can't reach, so it runs in `.github/workflows/job.yml` on a GitHub runner
@@ -58,13 +69,7 @@ optimizer is, how LQO was tested, the name, and the Join Order Benchmark results
 Agreed with the owner in October 2026, in this order. Each starts only when the
 owner says go:
 
-1. **v0.2.0, the proxy in shadow mode (`lqo serve`).** LQO speaks the PostgreSQL
-   wire protocol between the app and the database (simple and extended protocol,
-   prepared statements, TLS passthrough), records latency per shape, samples slow
-   shapes and re-runs them on a replica, and learns per shape with Thompson
-   sampling over the hints. A hint is promoted only after a minimum number of
-   samples and a clear margin. Shadow mode, the default, learns and reports but
-   changes nothing.
+1. **v0.2.0, the proxy in shadow mode (`lqo serve`).** Done, October 2026.
 2. **v0.3.0, active mode.** Proven hints applied to live queries with SET LOCAL; a
    regression guard per shape that reverts a hint whose live latency slips past
    the baseline; per-shape and global kill switches; fail-safe passthrough when
