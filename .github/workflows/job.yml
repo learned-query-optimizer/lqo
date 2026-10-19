@@ -3,7 +3,9 @@ name: job
 # Runs the Join Order Benchmark through lqo advise on a GitHub runner, with
 # the PostgreSQL 16 the runner image comes with, and commits the reports to
 # test/results/job/. It runs when the benchmark script or this file changes,
-# or by hand. It takes a few hours, mostly in the 113 queries' trials.
+# or by hand. A run with the standard hints takes about 75 minutes on a
+# standard runner. By hand, it can use the full hint set, another runner (a
+# larger one, once set up for the organisation) and another results folder.
 #
 # The commit it makes uses the workflow's own token, so it doesn't start the
 # test or release workflows.
@@ -15,6 +17,16 @@ on:
       - scripts/job.sh
       - .github/workflows/job.yml
   workflow_dispatch:
+    inputs:
+      hints:
+        description: "hint set: standard or full"
+        default: standard
+      runner:
+        description: "runner label"
+        default: ubuntu-latest
+      out:
+        description: "results folder under test/results"
+        default: job
 
 permissions:
   contents: write
@@ -25,7 +37,7 @@ concurrency:
 
 jobs:
   job:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v7
@@ -44,17 +56,20 @@ jobs:
       - name: Load IMDB and run JOB through lqo advise
         env:
           LQO_DSN: postgres://postgres:lqo@localhost:5432/imdb?sslmode=disable
+          JOB_HINTS: ${{ inputs.hints || 'standard' }}
+          JOB_OUT: ${{ inputs.out || 'job' }}
+          JOB_LIMIT: 320m
         run: bash scripts/job.sh
       - name: Commit the results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add test/results/job
+          git add "test/results/${{ inputs.out || 'job' }}"
           if git diff --cached --quiet; then
             echo "Nothing changed."
             exit 0
           fi
-          git commit -m "Record Join Order Benchmark results"
+          git commit -m "Record Join Order Benchmark results (${{ inputs.hints || 'standard' }} hints, ${{ inputs.runner || 'ubuntu-latest' }})"
           for i in 1 2 3; do
             git pull --rebase origin main && git push origin HEAD:main && exit 0
             sleep 10

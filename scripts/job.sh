@@ -12,11 +12,17 @@
 # the IMDB files are downloaded from CWI's server.
 #
 #   LQO_DSN=postgres://postgres:secret@localhost/imdb sh scripts/job.sh
+#
+# JOB_HINTS picks the hint set (standard, the default, or full) and JOB_OUT the
+# folder under test/results (job by default). JOB_LIMIT, such as 320m, stops
+# lqo advise after that long; it then writes the report of what it finished,
+# marked interrupted.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${LQO_DSN:?set LQO_DSN to the database to load IMDB into}"
 work=${JOB_WORK:-$(mktemp -d)}
-out=test/results/job
+hints=${JOB_HINTS:-standard}
+out=test/results/${JOB_OUT:-job}
 mkdir -p "$out"
 
 echo "== Join Order Benchmark queries"
@@ -58,9 +64,12 @@ done
 echo "== lqo advise"
 go build -o "$work/lqo" ./cmd/lqo
 start=$(date +%s)
-"$work/lqo" advise --dsn "$LQO_DSN" --allow-primary --top 113 --repeat 3 --samples 10 \
-	--max-time "${JOB_MAX_TIME:-120s}" --state "$work/state.json" \
-	--report json --out "$out/job.json" "$work/job.sql"
+rm -f "$out/job.json"
+limit=()
+[ -n "${JOB_LIMIT:-}" ] && limit=(timeout -s INT "$JOB_LIMIT")
+"${limit[@]}" "$work/lqo" advise --dsn "$LQO_DSN" --allow-primary --top 113 --repeat 3 --samples 10 \
+	--hints "$hints" --max-time "${JOB_MAX_TIME:-120s}" --state "$work/state.json" \
+	--report json --out "$out/job.json" "$work/job.sql" || [ -s "$out/job.json" ]
 end=$(date +%s)
 "$work/lqo" report --report text "$out/job.json" > "$out/job.txt"
 "$work/lqo" report --report markdown "$out/job.json" > "$out/job.md"
@@ -73,6 +82,6 @@ end=$(date +%s)
 	echo "settings: $(psql "$LQO_DSN" -Atc "SELECT string_agg(name || '=' || setting || coalesce(unit, ''), ', ' ORDER BY name) FROM pg_settings WHERE name IN ('shared_buffers', 'work_mem', 'effective_cache_size', 'max_parallel_workers_per_gather', 'random_page_cost', 'jit')")"
 	echo "queries: github.com/gregrahn/join-order-benchmark at $(cat "$work/job-commit.txt")"
 	echo "data: $(cat "$work/imdb-url.txt" 2>/dev/null || echo 'already downloaded')"
-	echo "command: lqo advise --allow-primary --top 113 --repeat 3 --samples 10 --max-time ${JOB_MAX_TIME:-120s}"
+	echo "command: lqo advise --allow-primary --top 113 --repeat 3 --samples 10 --hints $hints --max-time ${JOB_MAX_TIME:-120s}${JOB_LIMIT:+, stopped after $JOB_LIMIT}"
 } > "$out/environment.txt"
 echo "results written to $out/"
