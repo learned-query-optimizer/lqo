@@ -72,7 +72,8 @@ from ukue.com, content and config values only. The old personal blog was removed
 from the repo and its history at the owner's request (October 2026). Pages: about,
 contact, quick start, download, reference. Posts: the launch, what a learned query
 optimizer is, how LQO was tested, the name, the Join Order Benchmark results, lqo
-serve in shadow mode (0.2) and active mode (0.3) (October 2026). The 0.2 post's
+serve in shadow mode (0.2) and active mode (0.3), and four case studies tagged
+"case studies", built from the recorded runs with no customers (October 2026). The 0.2 post's
 results link points at the v0.2.0 tag, since the demo changed in 0.3. Images are drawn into static/images.
 
 ## Next
