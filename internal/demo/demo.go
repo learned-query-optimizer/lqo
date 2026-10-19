@@ -9,8 +9,8 @@
 // The traps are real ones. Customer attributes live in a JSONB column, and
 // the planner has no statistics for values inside JSON, so it guesses that
 // any one value matches 0.5% of rows. Two such conditions together it
-// guesses at 0.0025%, when in this data they match 25%. A plan built for a
-// handful of customers then runs for fifty thousand.
+// guesses at 0.0025%, when in this data they match half the customers. A
+// plan built for a handful of customers then runs for a hundred thousand.
 package demo
 
 import (
@@ -42,13 +42,13 @@ func SetupSQL(scale float64) []string {
 	return []string{
 		"DROP SCHEMA IF EXISTS " + Schema + " CASCADE",
 		"CREATE SCHEMA " + Schema,
-		// Every fourth customer is a gold partner; the newest thirty
+		// Every second customer is a gold partner; the newest thirty
 		// are platinum. tier and channel always go together.
 		fmt.Sprintf(`CREATE TABLE %[1]s.customers AS
 SELECT g AS id,
        jsonb_build_object(
-         'tier',    CASE WHEN g %% 4 = 0 THEN 'gold' WHEN g > %[2]d THEN 'platinum' ELSE 'basic' END,
-         'channel', CASE WHEN g %% 4 = 0 THEN 'partner' ELSE 'web' END) AS attrs,
+         'tier',    CASE WHEN g %% 2 = 0 THEN 'gold' WHEN g > %[2]d THEN 'platinum' ELSE 'basic' END,
+         'channel', CASE WHEN g %% 2 = 0 THEN 'partner' ELSE 'web' END) AS attrs,
        g %% 100 AS region,
        timestamp '2024-01-01' + g * interval '1 minute' AS created_at
 FROM generate_series(1, %[3]d) g`, Schema, c-30, c),
@@ -75,7 +75,7 @@ FROM generate_series(1, %d) g`, Schema, o, l),
 const Workload = `-- LQO demo workload, for the lqo_demo schema that "lqo demo" builds.
 
 -- 1. A trap. Two JSON conditions the planner guesses match 0.0025% of
---    customers actually match 25% (and 75%), so its nested loops run
+--    customers actually match half of them, so its nested loops run
 --    hundreds of thousands of times. A hash join is faster on both texts.
 SELECT sum(l.qty)
   FROM lqo_demo.customers c
@@ -98,7 +98,7 @@ SELECT id, created_at
  ORDER BY created_at
  LIMIT 10;
 
--- 3. Not a trap for every value. 'partner' turns up every fourth row and
+-- 3. Not a trap for every value. 'partner' turns up every second row and
 --    the index finds twenty at once; 'reseller' never does. A hint that
 --    helps one value hurts the other, so LQO should leave this alone.
 SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' = 'partner' ORDER BY created_at DESC LIMIT 20;

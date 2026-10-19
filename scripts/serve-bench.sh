@@ -89,21 +89,25 @@ minutes=${BENCH_LEARN_MINUTES:-15}
 start=$(date +%s)
 proven=""
 while [ $(( $(date +%s) - start )) -lt $(( minutes * 60 )) ]; do
-	psql -X -q "$via" -c "$trap1" -c "$trap2" -c "$key" > /dev/null
+	# Traffic for the first two minutes only: here the "replica" is this
+	# same machine, and a replica busy with the very queries being timed
+	# makes every round noisy. Afterwards the learner works from what it
+	# saw, as it would on a replica of its own.
+	if [ $(( $(date +%s) - start )) -lt 120 ]; then
+		psql -X -q "$via" -c "$trap1" -c "$trap2" -c "$key" > /dev/null
+	fi
 	if [ -z "$proven" ] && curl -s "http://$status/status" | grep -q '"status": "proven"'; then
 		proven=$(( $(date +%s) - start ))
 		curl -s "http://$status/" > "$work/first.txt"
 	fi
-	# Busy for two minutes, to give the learner texts and times; then
-	# quieter, since here the "replica" is this same busy machine.
-	if [ $(( $(date +%s) - start )) -lt 120 ]; then sleep 5; else sleep 30; fi
+	sleep 5
 done
 curl -s "http://$status/status" > "$out/demo.json"
 {
 	echo "# lqo serve learning from live traffic: the demo's trap query (two texts)"
-	echo "# and a key lookup, sent through LQO by psql every 5 seconds for two"
-	echo "# minutes, then every 30 seconds; the same server stands in for the"
-	echo "# replica (--allow-primary), with the default 25% budget"
+	echo "# and a key lookup, sent through LQO by psql every 5 seconds for the"
+	echo "# first two minutes; the same server stands in for the replica"
+	echo "# (--allow-primary), with the default 25% budget"
 	machine
 	echo "# traffic for $minutes minutes; first hint proven after: ${proven:-never} s"
 	echo
