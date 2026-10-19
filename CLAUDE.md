@@ -37,6 +37,14 @@ when it runs over 10% slower live; `lqo switch` and the status page's POST route
 turn hints off and on; nothing is applied while the replica or the state file is
 unavailable. Shadow mode stays the default.
 
+v0.4.0 adds shared learning (October 2026): shapes with the same tables in their
+FROM and JOIN clauses (`sqltext.Family`) are relatives; a shape's Thompson draws
+start from a prior pooled from its relatives (at most 2 texts' worth, fading with
+its own texts), and when a relative proved a hint, the shape times that hint
+alone each round while it's a clear win on every own text (focus). Proof stays
+per shape. `--share=false` turns it off. `test/results/serve/shared.txt`
+compares three new relatives with and without it.
+
 The code is Go with no dependencies: `internal/pgwire` is LQO's own small
 PostgreSQL client (simple query protocol, trust/md5/SCRAM, TLS), because pgx and
 golang.org/x modules can't be fetched from a cloud session. Keep it
@@ -79,8 +87,13 @@ results link points at the v0.2.0 tag, since the demo changed in 0.3. Images are
 ## Next
 
 Agreed with the owner in October 2026: v0.2.0 (shadow mode) and v0.3.0 (active
-mode) are both done. Nothing further is agreed; what comes next is decided with
-the owner before it goes here.
+mode) are done. On October 19 the owner said go for both of these, in this order:
 
-Ideas mentioned but not agreed: sharing what's learned across similar shapes,
-pg_hint_plan join-order hints.
+1. **v0.4.0, shared learning.** Done, October 2026.
+2. **v0.5.0, pg_hint_plan.** Optional: when the pg_hint_plan extension is on the
+   replica (and, for active mode, the primary), LQO also tries hints it can't
+   express with planner settings, built from the row counts its own trials
+   measured, and applies a proven one as a hint comment. Without the extension
+   nothing changes. The Join Order Benchmark runs again with it.
+
+Later ideas are decided with the owner before they go here.

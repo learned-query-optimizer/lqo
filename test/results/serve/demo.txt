@@ -4,45 +4,46 @@
 # replica (--allow-primary), with the default 25% budget. Once a hint is
 # proven, three more minutes of the same traffic, with a quarter of the
 # calls held out (--holdout 25) to compare.
-# recorded 2026-10-19 07:32 UTC, lqo 0.3.0
+# recorded 2026-10-19 09:06 UTC, lqo 0.4.0
 # Linux 6.18.44-fc-v139, Intel(R) Xeon(R) Processor @ 2.80GHz, 2 CPUs
 # server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
 # LQO, pgbench and PostgreSQL share this machine, so every one of them
 # takes CPU from the others; on separate machines the cost is lower.
-# first hint proven after: 423 s
+# first hint proven after: 389 s
 
 ## When the first hint was proven
 
-lqo 0.3.0, active mode, up 7m2s
+lqo 0.4.0, active mode, up 6m29s
 connections: 0 open, 11 in all
 statements measured: 33 in 2 shapes
-learning: 3 rounds, 12 hint trials, replica busy 2m7s, 1 proven
-applying: 1 hints
+learning: 3 rounds, 9 hint trials, replica busy 1m56s, 1 proven
+applying: 1 hint
 
 ef02bfce  lqo_test  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
-  22 calls, 65,283 ms in all, median 2,404 ms, p95 4,808 ms
-  proven: "no nested loop", about 48% faster on the replica
+  22 calls, 72,147 ms in all, median 2,404 ms, p95 5,717 ms
+  proven: "no nested loop, no sequential scan", about 42% faster on the replica, after 3 rounds
     SET LOCAL enable_nestloop = off;
-  applied: 0 calls, median 0.00 ms; 2,374 ms before
+    SET LOCAL enable_seqscan = off;
+  applied: 0 calls, median 0.00 ms; 2,623 ms before
 
 5fcb12e3  lqo_test  SELECT c.id, count(*), sum(l.qty) FROM lqo_demo.customers c JOIN lqo_…
-  11 calls, 8.7 ms in all, median 0.70 ms, p95 1.2 ms
+  11 calls, 8.7 ms in all, median 0.83 ms, p95 0.99 ms
   learning: not tried yet
 
 ## After three more minutes of live traffic
 
-lqo 0.3.0, active mode, up 10m8s
-connections: 0 open, 34 in all
-statements measured: 102 in 2 shapes
-learning: 4 rounds, 16 hint trials, replica busy 2m46s, 1 proven
-applying: 1 hints
+lqo 0.4.0, active mode, up 9m35s
+connections: 0 open, 32 in all
+statements measured: 96 in 2 shapes
+learning: 4 rounds, 12 hint trials, replica busy 2m38s, 1 proven
+applying: 1 hint
 
 ef02bfce  lqo_test  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
-  68 calls, 134,331 ms in all, median 1,700 ms, p95 4,043 ms
-  proven: "no nested loop", about 49% faster on the replica
+  64 calls, 151,707 ms in all, median 2,021 ms, p95 4,808 ms
+  proven: "no nested loop", about 53% faster on the replica, after 3 rounds
     SET LOCAL enable_nestloop = off;
-  applied: 35 calls, median 1,077 ms; 11 held out, median 2,174 ms; 2,374 ms before
+  applied: 10 calls, median 1,061 ms; 4 held out, median 2,158 ms; 2,623 ms before
 
 5fcb12e3  lqo_test  SELECT c.id, count(*), sum(l.qty) FROM lqo_demo.customers c JOIN lqo_…
-  34 calls, 26.6 ms in all, median 0.70 ms, p95 1.2 ms
+  32 calls, 25.3 ms in all, median 0.70 ms, p95 0.99 ms
   learning: not tried yet

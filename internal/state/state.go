@@ -66,6 +66,18 @@ type Learned struct {
 	Reverted   string          `json:"reverted,omitempty"`
 	RevertedAt time.Time       `json:"reverted_at,omitempty"`
 	Arms       map[string]*Arm `json:"arms,omitempty"`
+	// Family groups shapes that read the same tables; with sharing on, a
+	// shape's learning starts from its relatives' results. HeadStart is how
+	// many relatives' results it started from, when it last chose hints.
+	Family    string `json:"family,omitempty"`
+	HeadStart int    `json:"head_start,omitempty"`
+	// What learning has cost this shape on the replica, in all and up to
+	// the round its first hint was proven.
+	Trials        int     `json:"trials,omitempty"`
+	BusyMs        float64 `json:"busy_ms,omitempty"`
+	RoundsToProof int     `json:"rounds_to_proof,omitempty"`
+	TrialsToProof int     `json:"trials_to_proof,omitempty"`
+	BusyToProofMs float64 `json:"busy_to_proof_ms,omitempty"`
 }
 
 // Arm is the evidence for one hint on one shape. Each observation is one

@@ -1,0 +1,24 @@
+# lqo serve learning three new reports that read the same four tables as the
+# demo's trap, after the trap's hint was proven: once with sharing (the
+# default), once with --share=false, from the same state file. Traffic: each
+# report's two texts every 5 seconds for two minutes; --budget 100, so the
+# replica runs flat out and the times below are replica time.
+# recorded 2026-10-19 09:21 UTC, lqo 0.4.0
+# Linux 6.18.44-fc-v139, Intel(R) Xeon(R) Processor @ 2.80GHz, 2 CPUs
+# server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+# LQO, pgbench and PostgreSQL share this machine, so every one of them
+# takes CPU from the others; on separate machines the cost is lower.
+
+with sharing, all three proven after 212 s:
+  avg(p.price)           'no nested loop', 3 rounds, 3 hint trials, 55.3 s of replica time, head start from 3
+  max(p.price * l.qty)   'no nested loop', 3 rounds, 5 hint trials, 74.3 s of replica time, head start from 3
+  sum(l.qty)             'no nested loop', 3 rounds, 3 hint trials, 59.4 s of replica time, head start from 3
+  together               9 rounds, 11 hint trials, 188.9 s of replica time
+
+without sharing (--share=false), all three proven after 446 s:
+  avg(p.price)           'no nested loop', 3 rounds, 9 hint trials, 132.0 s of replica time
+  max(p.price * l.qty)   'no nested loop', 3 rounds, 9 hint trials, 104.5 s of replica time
+  sum(l.qty)             'no nested loop', 6 rounds, 18 hint trials, 183.4 s of replica time
+  together               12 rounds, 36 hint trials, 420.0 s of replica time
+
+sharing: 9 rounds against 12, 188.9 s of replica time against 420.0 s, 55% less

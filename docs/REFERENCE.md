@@ -271,6 +271,32 @@ mean, with the standard error as its width, never narrower than 0.05 over the
 square root of the count; a wide guess around no change for a hint never tried)
 and tries the three lowest draws.
 
+**Relatives.** A shape's family is the set of tables named in its FROM and JOIN
+clauses, subqueries and WITH queries included, as the text names them. Shapes on
+the same database with the same family are relatives. Unless `--share=false`,
+each hint's draw starts from a prior pooled from the relatives:
+
+- a text where the hint changed a relative's plan adds its log ratio;
+- a hint that never changed a relative's plan adds "no change" (0), once per text;
+- a hint a relative ruled out for being slower, timing out or changing the rows
+  adds one text at the log of 1.2.
+
+The pool counts for at most 2 texts (the hint with the most evidence is scaled
+to 2, the others in proportion), and it shrinks as the shape's own results come
+in: with n of its own texts, it counts for 2 / (1 + n). The draw's mean is the
+weighted mean of the prior and the shape's own mean, and its width uses both
+counts. The prior never enters the rule: proof, ruling out and `keep` use only
+the shape's own results.
+
+**Focus.** When a relative's proven hint has a pooled mean of at most the log of
+1 − `--min-gain` (the best such one, if several), and the shape is still
+learning with no text waiting for a second look, that hint goes first and the
+round times only one plan besides the default. That lasts while the hint has
+been a clear win (slowest run under the default plan's fastest, saving
+`--min-gain`) on every one of the shape's own texts where it changed the plan;
+after the first that isn't, rounds time three plans again. `head_start` in the state file and on the status page
+is how many relatives contributed when the shape last chose hints.
+
 What a result does to a hint:
 
 | Result | Effect |
@@ -350,7 +376,7 @@ plain passthrough.
 | `lqo_version`, `mode`, `started` | the running server; `mode` is `shadow` or `active` |
 | `connections_open`, `connections_total` | client connections |
 | `watch` | `statements` measured, `dropped` measurements, `shapes` |
-| `learning` | `rounds`, `trials`, `busy_ms`, `proven`, `applied`, `reverted`, `paused` (why nothing is applied, when nothing is), and `replica_down` with `last_error` while the replica can't be reached; absent without `--replica` |
+| `learning` | `rounds`, `trials` (plans run besides the default, however many hints gave each), `busy_ms`, `proven`, `applied`, `reverted`, `paused` (why nothing is applied, when nothing is), and `replica_down` with `last_error` while the replica can't be reached; absent without `--replica` |
 | `shapes[]` | each shape as in the state file below, and in active mode `applied`, `hinted_calls`, `hinted_p50_ms`, `holdout_calls`, `holdout_p50_ms`, `before_p50_ms` |
 
 ### In the state file
@@ -372,13 +398,19 @@ from `lqo advise` in the same file stay:
     "proven": "no nested loop",
     "settings": [{"name": "enable_nestloop", "value": "off"}],
     "gain": 0.36,
-    "arms": {"no nested loop": {"n": 4, "mean_log_ratio": -0.45, "strict_wins": 3, ...}}
+    "arms": {"no nested loop": {"n": 4, "mean_log_ratio": -0.45, "strict_wins": 3, ...}},
+    "family": "lqo_demo.customers,lqo_demo.order_lines,lqo_demo.orders,lqo_demo.products",
+    "head_start": 1,
+    "trials": 14, "busy_ms": 61200,
+    "rounds_to_proof": 3, "trials_to_proof": 9, "busy_to_proof_ms": 40100
   }
 }
 ```
 
 `status` is `learning`, `proven`, `keep`, `skipped` (not a plain read) or `error`
-(the default plan failed on three texts in a row). `example` holds a real text
+(the default plan failed on three texts in a row). `trials` and `busy_ms` are
+what learning has cost the shape on the replica, and the `_to_proof` fields the
+same up to the round its first hint was proven. `example` holds a real text
 with its values, as the application sent it; keep the state file where you'd keep
 your logs. It's saved every `--save-every` and on shutdown, the same atomic way as
 always.

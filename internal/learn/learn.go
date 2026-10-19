@@ -31,6 +31,7 @@ import (
 	"github.com/learned-query-optimizer/lqo/internal/advisor"
 	"github.com/learned-query-optimizer/lqo/internal/hints"
 	"github.com/learned-query-optimizer/lqo/internal/pgwire"
+	"github.com/learned-query-optimizer/lqo/internal/sqltext"
 	"github.com/learned-query-optimizer/lqo/internal/state"
 	"github.com/learned-query-optimizer/lqo/internal/watch"
 )
@@ -74,6 +75,11 @@ type Options struct {
 	// GuardCalls is how many hinted calls the guard waits for before it
 	// judges a hint live.
 	GuardCalls int64
+	// NoShare stops shapes from starting with their relatives' results.
+	NoShare bool
+	// ShareWeight is how many texts' worth of evidence the relatives' results
+	// count for, at most, when a shape's hints are drawn.
+	ShareWeight float64
 }
 
 // Defaults are the settings lqo serve uses unless told otherwise.
@@ -89,6 +95,7 @@ var Defaults = Options{
 	MaxTime:       30 * time.Second,
 	Holdout:       0.1,
 	GuardCalls:    20,
+	ShareWeight:   2,
 	Budget:        0.25,
 	RetryKeep:     24 * time.Hour,
 	SaveEvery:     30 * time.Second,
@@ -144,6 +151,9 @@ func (o *Options) fill() {
 	}
 	if o.GuardCalls <= 0 {
 		o.GuardCalls = d.GuardCalls
+	}
+	if o.ShareWeight <= 0 {
+		o.ShareWeight = d.ShareWeight
 	}
 }
 
@@ -367,6 +377,9 @@ func (l *Learner) sync(shapes []watch.Shape) {
 			l.file.Serve[s.Key] = e
 		}
 		e.Calls, e.TotalMs, e.P50Ms, e.P95Ms, e.LastSeen = s.Calls, s.TotalMs, s.P50Ms, s.P95Ms, s.LastSeen
+		if e.Family == "" && e.Normalized != "" {
+			e.Family = sqltext.Family(e.Normalized)
+		}
 		if len(s.Samples) > 0 {
 			e.Example = s.Samples[0].Text
 		}
@@ -431,7 +444,7 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 	if s := suspectText(e); s != "" {
 		text = s
 	}
-	want := l.choose(e, arms, text)
+	want, focus := l.choose(e, arms, text)
 	l.mu.Unlock()
 	if len(want) == 0 {
 		l.mu.Lock()
@@ -441,7 +454,14 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 	}
 
 	start := time.Now()
-	sr, err := r.adv.Trial(ctx, text, want, l.opt.ArmsPerRound)
+	timed := l.opt.ArmsPerRound
+	if focus {
+		// A relative proved this hint: try it alone first. If it holds on
+		// three texts, that's proof at a third of the replica time; if not,
+		// its head start fades and the shape is back to a few at a time.
+		timed = 1
+	}
+	sr, err := r.adv.Trial(ctx, text, want, timed)
 	busy := time.Since(start)
 	if err != nil {
 		return true, err
@@ -449,12 +469,18 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.stats.Rounds++
+	// A trial is a plan run, however many hints gave that plan.
+	plans := map[string]bool{}
 	for _, at := range sr.Arms {
-		if !at.Same {
+		if !at.Same && at.Plan != "" && !plans[at.Plan] {
+			plans[at.Plan] = true
 			l.stats.Trials++
+			e.Trials++
 		}
 	}
-	l.stats.BusyMs += float64(busy.Microseconds()) / 1000
+	ms := float64(busy.Microseconds()) / 1000
+	l.stats.BusyMs += ms
+	e.BusyMs += ms
 	l.dirty = true
 	e.Rounds++
 	e.LastTried = time.Now().UTC()
@@ -467,20 +493,41 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 // this text, and a proven shape's hint, lead. The trial plans them all and
 // runs the first ArmsPerRound distinct plans; hints whose plan is the
 // default's are noted without a run.
-func (l *Learner) choose(e *state.Learned, arms []hints.Arm, text string) []int {
+//
+// focus is true when the shape should time only the first: its relatives
+// proved that hint, and it has been a clear win on every one of the shape's
+// own texts so far.
+func (l *Learner) choose(e *state.Learned, arms []hints.Arm, text string) (want []int, focus bool) {
 	type cand struct {
 		i    int
 		draw float64
 	}
 	var cands []cand
 	var out []int
+	prior, fav := l.priors(e)
+	if fav != "" && e.Status == Learning && suspectText(e) == "" {
+		for i, a := range arms {
+			st := e.Arms[a.Name]
+			if a.Name != fav || (st != nil && (st.Out != "" || st.Suspect != "")) {
+				continue
+			}
+			if st != nil && st.Wins < st.N-st.SamePlan {
+				continue // not a clear win on every text so far
+			}
+			if st == nil {
+				e.Arms[a.Name] = &state.Arm{}
+			}
+			out = append(out, i)
+			focus = true
+		}
+	}
 	for i, a := range arms {
 		st := e.Arms[a.Name]
 		if st == nil {
 			st = &state.Arm{}
 			e.Arms[a.Name] = st
 		}
-		if st.Out != "" {
+		if st.Out != "" || (focus && a.Name == fav) {
 			continue
 		}
 		// Hints waiting for a second look on this text, and the proven
@@ -492,13 +539,13 @@ func (l *Learner) choose(e *state.Learned, arms []hints.Arm, text string) []int 
 		if st.Suspect != "" {
 			continue // its second look is on another text
 		}
-		cands = append(cands, cand{i, l.draw(st)})
+		cands = append(cands, cand{i, l.draw(st, prior[a.Name])})
 	}
 	sort.Slice(cands, func(x, y int) bool { return cands[x].draw < cands[y].draw })
 	for _, c := range cands {
 		out = append(out, c.i)
 	}
-	return out
+	return out, focus
 }
 
 // suspectText is a text some hint must be tried on again, if any.
@@ -518,9 +565,12 @@ func suspectText(e *state.Learned) string {
 
 // draw samples a plausible mean log ratio for a hint: hint time over default
 // time, so below zero is faster. With no evidence it's a wide guess around
-// "no change"; with evidence it narrows around what was seen.
-func (l *Learner) draw(a *state.Arm) float64 {
-	if a.N == 0 {
+// "no change"; with evidence it narrows around what was seen. A prior from
+// the shape's relatives counts as p.n texts' worth of evidence at p.mean
+// before the shape has any of its own, and less with each of its own. It
+// only orders the draws: proof takes the shape's own results.
+func (l *Learner) draw(a *state.Arm, p prior) float64 {
+	if a.N == 0 && p.n == 0 {
 		return l.rng.NormFloat64() * 0.5
 	}
 	sd := 0.3
@@ -528,7 +578,87 @@ func (l *Learner) draw(a *state.Arm) float64 {
 		sd = math.Sqrt(a.M2 / float64(a.N-1))
 	}
 	sd = max(sd, 0.05)
-	return a.Mean + l.rng.NormFloat64()*sd/math.Sqrt(float64(a.N))
+	// The head start fades as the shape's own texts come in.
+	pn := p.n / float64(1+a.N)
+	n := float64(a.N) + pn
+	mean := (a.Mean*float64(a.N) + p.mean*pn) / n
+	return mean + l.rng.NormFloat64()*sd/math.Sqrt(n)
+}
+
+// prior is what a shape's relatives say about one hint.
+type prior struct {
+	mean float64 // mean log ratio over the texts where the plan changed
+	n    float64 // how many texts' worth it counts for
+}
+
+// slowerPrior stands for a hint a relative ruled out: about 20% slower.
+var slowerPrior = math.Log(1.2)
+
+// priors pools, hint by hint, the results of the shapes in e's family: other
+// shapes on the same database that read the same tables. Texts where a hint
+// didn't change the plan say nothing about how it does when it does, so
+// they're left out. A hint a relative ruled out for being slower, timing out
+// or changing the rows counts as one text 20% slower. All of it together
+// counts for at most ShareWeight texts, so a shape's own results soon
+// outweigh it.
+//
+// fav is a hint some relative proved, the one with the best pooled mean, if
+// that mean saves at least MinGain: the hint worth trying alone first.
+func (l *Learner) priors(e *state.Learned) (out map[string]prior, fav string) {
+	e.HeadStart = 0
+	if l.opt.NoShare || e.Family == "" {
+		return nil, ""
+	}
+	sum := map[string]float64{}
+	w := map[string]float64{}
+	proven := map[string]bool{}
+	for _, o := range l.file.Serve {
+		if o.Key == e.Key || o.Family != e.Family || o.Database != e.Database {
+			continue
+		}
+		if o.Status == Proven && o.Proven != "" {
+			proven[o.Proven] = true
+		}
+		used := false
+		for name, a := range o.Arms {
+			switch {
+			case a.Out != "" && a.Out != "it doesn't change the plan" && !strings.HasPrefix(a.Out, "error"):
+				sum[name] += slowerPrior
+				w[name]++
+				used = true
+			case a.N > a.SamePlan:
+				k := float64(a.N - a.SamePlan)
+				sum[name] += a.Mean * float64(a.N) // same-plan texts added 0
+				w[name] += k
+				used = true
+			case a.SamePlan > 0:
+				// It never changed a relative's plan: most likely it
+				// won't change this one's much either.
+				w[name] += float64(a.SamePlan)
+				used = true
+			}
+		}
+		if used {
+			e.HeadStart++
+		}
+	}
+	if len(w) == 0 {
+		return nil, ""
+	}
+	total := 0.0
+	for _, v := range w {
+		total = max(total, v)
+	}
+	scale := min(1, l.opt.ShareWeight/total)
+	out = make(map[string]prior, len(w))
+	best := math.Log(1 - l.opt.MinGain)
+	for name, v := range w {
+		out[name] = prior{mean: sum[name] / v, n: v * scale}
+		if proven[name] && out[name].mean <= best {
+			best, fav = out[name].mean, name
+		}
+	}
+	return out, fav
 }
 
 // update records one round's results and decides what they mean.
@@ -679,6 +809,9 @@ func (l *Learner) settle(e *state.Learned, arms []hints.Arm) {
 			}
 			if e.Status != Proven {
 				l.stats.Proven++
+			}
+			if e.RoundsToProof == 0 {
+				e.RoundsToProof, e.TrialsToProof, e.BusyToProofMs = e.Rounds, e.Trials, e.BusyMs
 			}
 			e.Status, e.Reason, e.Proven, e.ProvenAt = Proven, "", best, time.Now().UTC()
 			l.opt.Logf("proven: %s %s with %q, %.0f%% faster", e.Database, e.ID[:8], best, (1-e.Arms[best].SumMs/e.Arms[best].SumBaseMs)*100)

@@ -1,23 +1,23 @@
 # lqo serve overhead: pgbench -S (one indexed SELECT per transaction),
 # 8 clients for 20s each, measuring only (no --replica)
-# recorded 2026-10-19 07:19 UTC, lqo 0.3.0
+# recorded 2026-10-19 08:53 UTC, lqo 0.4.0
 # Linux 6.18.44-fc-v139, Intel(R) Xeon(R) Processor @ 2.80GHz, 2 CPUs
 # server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
 # LQO, pgbench and PostgreSQL share this machine, so every one of them
 # takes CPU from the others; on separate machines the cost is lower.
 
 simple protocol
-  straight to the server: 29343.740603 tps, 0.273 ms average latency
-  through lqo serve:      11804.571013 tps, 0.678 ms average latency
+  straight to the server: 28427.540474 tps, 0.281 ms average latency
+  through lqo serve:      10754.011240 tps, 0.744 ms average latency
 extended protocol
-  straight to the server: 25261.060722 tps, 0.317 ms average latency
-  through lqo serve:      12315.540807 tps, 0.650 ms average latency
+  straight to the server: 24166.040787 tps, 0.331 ms average latency
+  through lqo serve:      11225.283769 tps, 0.713 ms average latency
 prepared protocol
-  straight to the server: 45387.414522 tps, 0.176 ms average latency
-  through lqo serve:      17132.001339 tps, 0.467 ms average latency
+  straight to the server: 41686.871965 tps, 0.192 ms average latency
+  through lqo serve:      16410.732235 tps, 0.487 ms average latency
 
   "connections_total": 27,
-  "statements": 822057,
+  "statements": 765206,
   "dropped": 0,
 
 # Active mode: the same, with a hint applied to every one of pgbench's
@@ -25,15 +25,15 @@ prepared protocol
 # what applying a hint costs: one more statement in the same round trip
 
 simple protocol
-  straight to the server: 29343.740603 tps, 0.273 ms average latency
-  through lqo serve, hinted: 9287.470846 tps, 0.861 ms average latency
+  straight to the server: 28427.540474 tps, 0.281 ms average latency
+  through lqo serve, hinted: 9206.345783 tps, 0.869 ms average latency
 extended protocol
-  straight to the server: 25261.060722 tps, 0.317 ms average latency
-  through lqo serve, hinted: 10767.026976 tps, 0.743 ms average latency
+  straight to the server: 24166.040787 tps, 0.331 ms average latency
+  through lqo serve, hinted: 9970.910217 tps, 0.802 ms average latency
 prepared protocol
-  straight to the server: 45387.414522 tps, 0.176 ms average latency
-  through lqo serve, hinted: 12039.697083 tps, 0.664 ms average latency
+  straight to the server: 41686.871965 tps, 0.192 ms average latency
+  through lqo serve, hinted: 11691.401408 tps, 0.684 ms average latency
 
   "applied": 1,
   "applied": true,
-  "hinted_calls": 639557,
+  "hinted_calls": 615308,

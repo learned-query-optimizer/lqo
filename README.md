@@ -89,12 +89,12 @@ a report like this one, from the recorded run in
 Faster with a hint: 2 of 5 tested
 
   1. ef02bfce  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_…  (2 calls)
-     2,297 ms → 1,078 ms (−53%) with "no nested loop"
+     2,373 ms → 1,173 ms (−51%) with "no nested loop"
      Plan: Nested Loop ×3, Bitmap Heap Scan on orders, Index Scan on order_lines, Index Scan on products → Hash Join ×3, Seq Scan on order_lines, Seq Scan on orders, Seq Scan on products
        SET LOCAL enable_nestloop = off;
 
   2. 6c73a7a6  SELECT id, created_at FROM lqo_demo.customers WHERE attrs->>'ti…  (1 call)
-     48.4 ms → 30.9 ms (−36%) with "no index scan"
+     44.7 ms → 29.7 ms (−34%) with "no index scan"
      Plan: Index Scan on customers → Seq Scan on customers
        SET LOCAL enable_indexscan = off;
        SET LOCAL enable_indexonlyscan = off;
@@ -297,20 +297,21 @@ only needs the server's address and TLS settings; `--replica` needs a login, lik
 The status page, on `http://127.0.0.1:6434/` by default, shows what it has seen and
 learned, and `/status` has the same as JSON. `lqo show` reads it from the state
 file afterwards. This is the recorded run on the demo, from
-[test/results/serve/demo.txt](test/results/serve/demo.txt), seven minutes in, when the first hint was proven:
+[test/results/serve/demo.txt](test/results/serve/demo.txt), six and a half minutes in, when the first hint was proven:
 
 ```
-lqo 0.3.0, active mode, up 7m2s
+lqo 0.4.0, active mode, up 6m29s
 connections: 0 open, 11 in all
 statements measured: 33 in 2 shapes
-learning: 3 rounds, 12 hint trials, replica busy 2m7s, 1 proven
-applying: 1 hints
+learning: 3 rounds, 9 hint trials, replica busy 1m56s, 1 proven
+applying: 1 hint
 
 ef02bfce  lqo_test  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
-  22 calls, 65,283 ms in all, median 2,404 ms, p95 4,808 ms
-  proven: "no nested loop", about 48% faster on the replica
+  22 calls, 72,147 ms in all, median 2,404 ms, p95 5,717 ms
+  proven: "no nested loop, no sequential scan", about 42% faster on the replica, after 3 rounds
     SET LOCAL enable_nestloop = off;
-  applied: 0 calls, median 0.00 ms; 2,374 ms before
+    SET LOCAL enable_seqscan = off;
+  applied: 0 calls, median 0.00 ms; 2,623 ms before
 ```
 
 **How it learns.** Trying all 13 hints on every text would keep the replica busy
@@ -326,11 +327,25 @@ A bad result on one text is tried again before it counts, because a replica busy
 with other work can make one round look bad. A proven hint that fails a later
 check loses its standing.
 
+**Learning from relatives.** Shapes that read the same tables are relatives: a
+revenue report and an order count over the same joins usually trip over the same
+estimate. A new shape starts from what its relatives showed: hints that won for
+them are drawn first, and ones that were slower for them last. When a relative
+has proven a hint, the new shape tries that hint alone, one plan per round
+instead of three, for as long as it's a clear win on each of its own texts. If
+it fails once, the shape goes back to three at a time. Either way a hint is
+proven for the new shape on its own texts, by the same rule, and its own
+results soon outweigh the relatives'. `--share=false` turns it off. In the
+recorded run, three new reports on the same tables as the demo's trap were all
+proven in 212 seconds and 189 seconds of replica time with sharing, against 446
+and 420 seconds without: 11 plan runs instead of 36
+([test/results/serve/shared.txt](test/results/serve/shared.txt)).
+
 **What it costs.** The learner keeps the replica busy at most a quarter of the time
 (`--budget`). The proxy adds time to every query, mostly the extra hop. On the
 two-core test machine, shared by pgbench, PostgreSQL and LQO, a one-row indexed
-SELECT took 0.18 ms straight and 0.47 ms through LQO with prepared statements, and
-0.27 ms against 0.68 ms with plain queries
+SELECT took 0.19 ms straight and 0.49 ms through LQO with prepared statements, and
+0.28 ms against 0.74 ms with plain queries
 ([test/results/serve/overhead.txt](test/results/serve/overhead.txt)). With LQO on
 its own cores, or next to the application, the cost is lower; measure it on yours
 before you rely on it. Measuring never holds traffic up: if LQO falls behind, it drops
@@ -394,19 +409,21 @@ they last for that one statement's transaction and end with it.
 The status page shows, per shape, the calls with the hint and without, and their
 medians. In the recorded run on the demo
 ([test/results/serve/demo.txt](test/results/serve/demo.txt)), three minutes after
-the hint was proven, with a quarter of the calls held out (`--holdout 25`):
+the first hint was proven, with a quarter of the calls held out (`--holdout 25`).
+In between, a later check on the replica found plain "no nested loop" faster than
+the first hint, so it took its place, and the live counts started again:
 
 ```
 ef02bfce  lqo_test  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
-  68 calls, 134,331 ms in all, median 1,700 ms, p95 4,043 ms
-  proven: "no nested loop", about 49% faster on the replica
+  64 calls, 151,707 ms in all, median 2,021 ms, p95 4,808 ms
+  proven: "no nested loop", about 53% faster on the replica, after 3 rounds
     SET LOCAL enable_nestloop = off;
-  applied: 35 calls, median 1,077 ms; 11 held out, median 2,174 ms; 2,374 ms before
+  applied: 10 calls, median 1,061 ms; 4 held out, median 2,158 ms; 2,623 ms before
 ```
 
 Applying a hint costs one more statement in the same round trip. With every one of
-pgbench's SELECTs hinted, the one-row SELECT took 0.66 ms through LQO with prepared
-statements and 0.86 ms with plain queries, against 0.47 ms and 0.68 ms unhinted
+pgbench's SELECTs hinted, the one-row SELECT took 0.68 ms through LQO with prepared
+statements and 0.87 ms with plain queries, against 0.49 ms and 0.74 ms unhinted
 ([test/results/serve/overhead.txt](test/results/serve/overhead.txt)).
 
 ## What LQO will and won't run
@@ -485,6 +502,7 @@ lqo version                      print the version
 | `--replica` | none | a replica to learn on, with a login; without it LQO only measures |
 | `--mode` | `shadow` | `shadow` (learn and report) or `active` (also apply proven hints); active needs `--replica` |
 | `--holdout` | 10 | in active mode, percent of a hinted shape's calls run without the hint |
+| `--share` | true | start each shape's learning from its relatives' results; `--share=false` for none |
 | `--allow-primary` | off | let `--replica` be a primary |
 | `--listen` | `127.0.0.1` | address to listen on, or a directory for a Unix socket |
 | `--port` | 6433 | port to listen on |
@@ -508,13 +526,14 @@ refusal, such as a primary without `--allow-primary`.
 [docs/REFERENCE.md](docs/REFERENCE.md) has the details: workload formats, the
 JSON report, the state file and the connection settings.
 
-## What 0.3 doesn't do
+## What 0.4 doesn't do
 
 - **It changes nothing unless you ask.** `lqo advise` and `lqo serve` in shadow
   mode only report. Only `lqo serve --mode active` applies hints, and only ones
   proven on the replica.
-- **It doesn't learn across shapes yet.** Each shape is tested on its own. A new
-  shape needs its own run.
+- **It doesn't prove anything for a shape from other shapes' results.** Relatives
+  only decide which hints a new shape tries first; each shape still needs its own
+  texts to prove one. `lqo advise` tries every hint anyway, so it doesn't share.
 - **Only planner switches.** No join-order hints beyond "as written", and no
   pg_hint_plan. Plans that need a different join order than any switch produces
   are out of reach.

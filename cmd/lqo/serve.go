@@ -42,6 +42,11 @@ reports what it learned, at the status address and with lqo show. With
 holds some calls out to compare, and takes a hint back when it runs slower
 live. lqo switch turns hints off and on while it runs.
 
+Shapes that read the same tables are relatives. A new shape starts its
+learning from what its relatives have shown, so it tries the likely winners
+first; it still needs its own results to prove a hint. --share=false turns
+that off.
+
 Applications log in to the server through LQO with their own user and
 password; LQO holds no passwords. --dsn needs only the server's address and
 TLS settings. --replica needs a login, as lqo advise does.
@@ -52,7 +57,7 @@ Flags:
 type serveFlags struct {
 	dsn, replica, listen, status, tlsCert, tlsKey, statePath, hintSet, mode string
 	port                                                                    int
-	allowPrimary, noState, quiet                                            bool
+	allowPrimary, noState, quiet, share                                     bool
 	minGain, minMs, budget, holdout                                         float64
 	maxTime, grace, saveEvery                                               time.Duration
 	session                                                                 settingList
@@ -70,6 +75,7 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	fs.StringVar(&f.status, "status", "127.0.0.1:6434", `address of the status page ("" for none)`)
 	fs.StringVar(&f.mode, "mode", "shadow", "shadow (learn and report) or active (also apply proven hints)")
 	fs.Float64Var(&f.holdout, "holdout", d.Holdout*100, "in active mode, percent of a hinted shape's calls run without the hint, to compare")
+	fs.BoolVar(&f.share, "share", true, "start each shape's learning from what similar shapes, reading the same tables, have shown")
 	fs.StringVar(&f.tlsCert, "tls-cert", "", "certificate for clients that connect with TLS")
 	fs.StringVar(&f.tlsKey, "tls-key", "", "its private key")
 	fs.BoolVar(&f.allowPrimary, "allow-primary", false, "let --replica be a primary server")
@@ -174,6 +180,7 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			Logf:         logf,
 			Active:       f.mode == "active",
 			Holdout:      f.holdout / 100,
+			NoShare:      !f.share,
 		})
 		if err != nil {
 			return err
@@ -389,7 +396,7 @@ func writeStatusText(w io.Writer, r statusReport) {
 		}
 		fmt.Fprintln(w)
 		if r.Mode == "active" {
-			fmt.Fprintf(w, "applying: %d hints", r.Learning.Applied)
+			fmt.Fprintf(w, "applying: %s", plural(r.Learning.Applied, "hint"))
 			if r.Learning.Paused != "" {
 				fmt.Fprintf(w, " (none applied now: %s)", r.Learning.Paused)
 			}
@@ -410,7 +417,14 @@ func writeStatusText(w io.Writer, r statusReport) {
 		fmt.Fprintf(w, "  %d calls, %s ms in all, median %s ms, p95 %s ms\n", s.Calls, watch.FormatMs(s.TotalMs), watch.FormatMs(s.P50Ms), watch.FormatMs(s.P95Ms))
 		switch s.Status {
 		case learn.Proven:
-			fmt.Fprintf(w, "  proven: %q, about %.0f%% faster on the replica\n", s.Proven, s.Gain*100)
+			fmt.Fprintf(w, "  proven: %q, about %.0f%% faster on the replica", s.Proven, s.Gain*100)
+			if s.RoundsToProof > 0 {
+				fmt.Fprintf(w, ", after %s", plural(s.RoundsToProof, "round"))
+				if s.HeadStart > 0 {
+					fmt.Fprintf(w, " with a head start from %s", plural(s.HeadStart, "similar shape"))
+				}
+			}
+			fmt.Fprintln(w)
 			for _, st := range s.Settings {
 				fmt.Fprintf(w, "    SET LOCAL %s = %s;\n", st.Name, st.Value)
 			}
@@ -426,7 +440,11 @@ func writeStatusText(w io.Writer, r statusReport) {
 			}
 		case learn.Learning:
 			if s.Rounds > 0 {
-				fmt.Fprintf(w, "  learning: %d rounds on %d texts\n", s.Rounds, s.Texts)
+				fmt.Fprintf(w, "  learning: %s on %s", plural(s.Rounds, "round"), plural(s.Texts, "text"))
+				if s.HeadStart > 0 {
+					fmt.Fprintf(w, ", with a head start from %s", plural(s.HeadStart, "similar shape"))
+				}
+				fmt.Fprintln(w)
 			} else {
 				fmt.Fprintln(w, "  learning: not tried yet")
 			}
@@ -438,6 +456,14 @@ func writeStatusText(w io.Writer, r statusReport) {
 			fmt.Fprintln(w)
 		}
 	}
+}
+
+// plural says "1 round" or "3 rounds".
+func plural(n int, what string) string {
+	if n == 1 {
+		return "1 " + what
+	}
+	return fmt.Sprintf("%d %ss", n, what)
 }
 
 func firstNonEmpty(a, b string) string {

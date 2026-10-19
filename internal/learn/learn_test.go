@@ -131,7 +131,7 @@ func TestOneNoisyRoundIsForgiven(t *testing.T) {
 	if s := suspectText(e); s != "t" {
 		t.Errorf("the next round should retry the text, got %q", s)
 	}
-	if got := l.choose(e, testArms, "t"); len(got) == 0 || got[0] != 0 {
+	if got, _ := l.choose(e, testArms, "t"); len(got) == 0 || got[0] != 0 {
 		t.Errorf("the suspect hint should be tried first: %v", got)
 	}
 	for i := 0; i < 3; i++ {
@@ -213,7 +213,8 @@ func TestThompsonFavoursTheEvidence(t *testing.T) {
 	}
 	counts := map[int]int{}
 	for i := 0; i < 1000; i++ {
-		counts[l.choose(e, testArms, "t")[0]]++
+		got, _ := l.choose(e, testArms, "t")
+		counts[got[0]]++
 	}
 	if counts[0] < 900 {
 		t.Errorf("the hint with the best evidence was picked %d times in 1000: %v", counts[0], counts)
@@ -229,7 +230,8 @@ func TestUntriedHintsGetTheirTurn(t *testing.T) {
 	e := newShape(l)
 	seen := map[int]bool{}
 	for i := 0; i < 50; i++ {
-		for _, a := range l.choose(e, testArms, "t")[:2] {
+		got, _ := l.choose(e, testArms, "t")
+		for _, a := range got[:2] {
 			seen[a] = true
 		}
 	}
@@ -343,6 +345,47 @@ func TestLearnsTheDemoTrapThroughTheProxy(t *testing.T) {
 			t.Errorf("the key lookup got a hint: %+v", s)
 		}
 	}
+
+	// A relative arrives: another report on the same four tables. It starts
+	// from what the trap showed, so it tries the trap's hint first, alone,
+	// and still proves it on its own texts.
+	sibling := func(tier, channel string) string {
+		return strings.Replace(trap(tier, channel), "sum(l.qty * p.price)", "avg(p.price)", 1)
+	}
+	for i := 0; i < 3; i++ {
+		for _, q := range []string{sibling("gold", "partner"), sibling("basic", "web")} {
+			if _, err := app.ExecOne(ctx, q); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	col.Flush()
+	var sib *state.Learned
+	for round := 0; round < 40; round++ {
+		if _, err := l.round(ctx); err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range l.Shapes() {
+			if strings.Contains(s.Normalized, "avg ( p . price )") {
+				s := s
+				sib = &s
+			}
+		}
+		if sib != nil && sib.Rounds == 1 {
+			// It starts with the hint its relative proved, alone.
+			a := sib.Arms[trapShape.Proven]
+			if sib.HeadStart != 1 || a == nil || a.N-a.SamePlan < 1 || sib.Trials != 1 {
+				t.Errorf("the relative's first round: head start %d, %d trials, %q %+v", sib.HeadStart, sib.Trials, trapShape.Proven, a)
+			}
+		}
+		if sib != nil && sib.Status == Proven {
+			break
+		}
+	}
+	if sib == nil || sib.Status != Proven || sib.Proven != trapShape.Proven {
+		t.Fatalf("the relative wasn't proven the same way: %+v", sib)
+	}
+	t.Logf("relative proven after %d rounds and %d trials with %q, %.0f%% faster", sib.RoundsToProof, sib.TrialsToProof, sib.Proven, sib.Gain*100)
 	conn.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE")
 }
 
