@@ -288,3 +288,27 @@ func TestThroughTheProxy(t *testing.T) {
 		t.Errorf("dropped %d", st.Dropped)
 	}
 }
+
+// FuzzSession feeds a session arbitrary messages in both directions. Whatever
+// a client or server sends, watching must never panic or block.
+func FuzzSession(f *testing.F) {
+	f.Add([]byte("PBESZ"), []byte("s1\x00SELECT $1\x00\x00\x01\x00\x00\x00\x17"))
+	f.Add([]byte("QCZ"), []byte("SELECT 1\x00"))
+	f.Fuzz(func(t *testing.T, types []byte, body []byte) {
+		c := NewCollector()
+		defer c.Close()
+		s := c.Open(map[string]string{"user": "u"})
+		for i, typ := range types {
+			b := body
+			if len(b) > 0 {
+				b = b[i%len(b):]
+			}
+			if i%2 == 0 {
+				s.FromClient(typ, b)
+			} else {
+				s.FromServer(typ, b)
+			}
+		}
+		s.Close()
+	})
+}

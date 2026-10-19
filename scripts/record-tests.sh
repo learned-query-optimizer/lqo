@@ -2,8 +2,8 @@
 # Copyright lqo.net 2026
 # SPDX-License-Identifier: Apache-2.0
 #
-# Runs every test, the race detector, the smoke check and the demo
-# benchmark against a PostgreSQL server, and writes the output to
+# Runs every test, the race detector, the smoke check, the demo benchmark
+# and the lqo serve benchmark against a PostgreSQL server, and writes the output to
 # test/results/ with a note of the machine it ran on. Every number on
 # lqo.net and in the README comes from these files.
 #
@@ -30,10 +30,10 @@ header() {
 test -z "$(gofmt -l .)"
 go vet ./...
 
-cmd="go test -count=1 -v ./..."
+cmd="go test -p 1 -count=1 -v ./..."
 { header "Every test, verbose, against a real server" "$cmd"; $cmd 2>&1; } > "$out/tests.txt"
 
-cmd="go test -race -short -count=1 ./..."
+cmd="go test -p 1 -race -short -count=1 ./..."
 { header "Every test with the race detector (short: no demo benchmark, fewer kills)" "$cmd"; $cmd 2>&1; } > "$out/race.txt"
 
 bin=$(mktemp -d)/lqo
@@ -48,6 +48,9 @@ wl=$(mktemp -d)/lqo-demo.sql
 "$bin" report --report text "$out/demo/report.json" > "$out/demo/report.txt"
 "$bin" report --report markdown "$out/demo/report.json" > "$out/demo/report.md"
 header "Demo benchmark: lqo advise on the demo workload" "lqo advise --allow-primary lqo-demo.sql" > "$out/demo/environment.txt"
+
+# lqo serve: proxy overhead and learning the demo trap from live traffic.
+bash scripts/serve-bench.sh "$bin"
 
 grep -E '^(ok|FAIL|---)' "$out/tests.txt" "$out/race.txt" | grep -v -- '--- PASS' || true
 tail -n 1 "$out/smoke.txt"

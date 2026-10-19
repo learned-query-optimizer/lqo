@@ -106,7 +106,7 @@ func (o *Options) fill() {
 		o.MinMs = 0
 	}
 	if o.MinCalls <= 0 {
-		o.MinCalls = 1
+		o.MinCalls = d.MinCalls
 	}
 	if o.MaxTime <= 0 {
 		o.MaxTime = d.MaxTime
@@ -213,8 +213,15 @@ func (l *Learner) Run(ctx context.Context) error {
 			continue
 		}
 		backoff = time.Second
+		if !worked && l.Stats().ReplicaDown {
+			// Nothing to try right now, but say as soon as the replica is
+			// back rather than on the next round.
+			if _, err := l.replicaFor(ctx, l.opt.Replica.Database); err != nil {
+				l.fail(err)
+			}
+		}
 		if !worked {
-			sleep(ctx, 5*time.Second)
+			sleep(ctx, time.Second)
 			continue
 		}
 		// Keep the replica busy at most Budget of the time.
@@ -370,7 +377,10 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 
 	l.mu.Lock()
 	text := sh.Samples[e.Rounds%len(sh.Samples)].Text
-	want := l.choose(e, arms)
+	if s := suspectText(e); s != "" {
+		text = s
+	}
+	want := l.choose(e, arms, text)
 	l.mu.Unlock()
 	if len(want) == 0 {
 		l.mu.Lock()
@@ -400,13 +410,13 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 // choose draws from each eligible hint's evidence and returns the indexes
 // of the most promising draws. A proven shape always includes its hint, to
 // keep checking it on new texts.
-func (l *Learner) choose(e *state.Learned, arms []hints.Arm) []int {
+func (l *Learner) choose(e *state.Learned, arms []hints.Arm, text string) []int {
 	type cand struct {
 		i    int
 		draw float64
 	}
 	var cands []cand
-	proven := -1
+	var out []int
 	for i, a := range arms {
 		st := e.Arms[a.Name]
 		if st == nil {
@@ -416,24 +426,40 @@ func (l *Learner) choose(e *state.Learned, arms []hints.Arm) []int {
 		if st.Out != "" {
 			continue
 		}
-		if e.Status == Proven && a.Name == e.Proven {
-			proven = i
+		// Hints waiting for a second look on this text, and the proven
+		// hint, go first.
+		if (st.Suspect != "" && st.Suspect == text) || (e.Status == Proven && a.Name == e.Proven) {
+			out = append(out, i)
 			continue
+		}
+		if st.Suspect != "" {
+			continue // its second look is on another text
 		}
 		cands = append(cands, cand{i, l.draw(st)})
 	}
 	sort.Slice(cands, func(x, y int) bool { return cands[x].draw < cands[y].draw })
-	var out []int
-	if proven >= 0 {
-		out = append(out, proven)
-	}
 	for _, c := range cands {
-		if len(out) >= l.opt.ArmsPerRound {
+		if len(out) >= max(l.opt.ArmsPerRound, 1) {
 			break
 		}
 		out = append(out, c.i)
 	}
 	return out
+}
+
+// suspectText is a text some hint must be tried on again, if any.
+func suspectText(e *state.Learned) string {
+	names := make([]string, 0, len(e.Arms))
+	for n := range e.Arms {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		if st := e.Arms[n]; st.Out == "" && st.Suspect != "" {
+			return st.Suspect
+		}
+	}
+	return ""
 }
 
 // draw samples a plausible mean log ratio for a hint: hint time over default
@@ -479,11 +505,21 @@ func (l *Learner) update(e *state.Learned, sr advisor.SampleResult, arms []hints
 			continue
 		}
 		st.Texts++
+		// A bad result is confirmed on the same text before it counts.
+		confirm := func(why string) {
+			if st.Suspect == sr.Text {
+				st.Out = why
+				st.Suspect, st.SuspectWhy = "", ""
+				return
+			}
+			st.Suspect, st.SuspectWhy = sr.Text, why
+		}
+		retest := st.Suspect == sr.Text
 		switch {
 		case at.Error != "":
 			st.Out = "error: " + at.Error
 		case at.TimedOut:
-			st.Out = "it hit the time limit"
+			confirm("it hit the time limit twice on the same text")
 		case at.Same:
 			st.SamePlan++
 			observe(st, 0, 1)
@@ -496,10 +532,15 @@ func (l *Learner) update(e *state.Learned, sr advisor.SampleResult, arms []hints
 			st.Out = "no usable time"
 		default:
 			ratio := at.Ms / sr.BaseMs
-			observe(st, math.Log(ratio), ratio)
 			if ratio > 1+l.opt.Tolerance {
-				st.Out = fmt.Sprintf("it was %.0f%% slower on a text", (ratio-1)*100)
+				confirm(fmt.Sprintf("it was %.0f%% slower on a text, twice", (ratio-1)*100))
+				break
 			}
+			if retest {
+				// The second look was fine: the first was noise.
+				st.Suspect, st.SuspectWhy = "", ""
+			}
+			observe(st, math.Log(ratio), ratio)
 			slowest := 0.0
 			for _, v := range at.Runs {
 				slowest = max(slowest, v)
@@ -539,7 +580,7 @@ const z = 1.645
 
 // provable reports whether a hint meets the rule.
 func (l *Learner) provable(st *state.Arm) bool {
-	if st.Out != "" || st.N < l.opt.MinObs || st.Wins < 1 || st.N == st.SamePlan {
+	if st.Out != "" || st.Suspect != "" || st.N < l.opt.MinObs || st.Wins < 1 || st.N == st.SamePlan {
 		return false
 	}
 	target := math.Log(1 - l.opt.MinGain)
@@ -624,7 +665,14 @@ func (l *Learner) Save() error {
 	if !l.dirty {
 		return nil
 	}
-	if err := l.file.Save(l.opt.StatePath); err != nil {
+	// lqo advise may have saved its own findings to the same file since;
+	// keep those and replace only what the proxy learned.
+	out := l.file
+	if disk, err := state.Load(l.opt.StatePath); err == nil {
+		disk.Serve = l.file.Serve
+		out = disk
+	}
+	if err := out.Save(l.opt.StatePath); err != nil {
 		return err
 	}
 	l.dirty = false

@@ -72,6 +72,11 @@ type Arm struct {
 	SamePlan int     `json:"same_plan"`
 	Texts    int     `json:"texts"`
 	Out      string  `json:"ruled_out,omitempty"`
+	// Suspect is a text on which the hint looked slower, or timed out,
+	// once. A replica busy with other work can make one round look bad,
+	// so the hint is tried on that text again before it is ruled out.
+	Suspect    string `json:"suspect_text,omitempty"`
+	SuspectWhy string `json:"suspect_why,omitempty"`
 }
 
 // Entry is the latest finding for one query shape.

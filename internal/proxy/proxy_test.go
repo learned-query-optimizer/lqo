@@ -201,8 +201,18 @@ func TestRelayGivesTheSameResults(t *testing.T) {
 	}
 }
 
+// serverTLS skips a test that needs the server itself to offer TLS.
+func serverTLS(t *testing.T, dsn string) {
+	t.Helper()
+	c := connect(t, dsn)
+	if v, err := c.QueryValue(context.Background(), "SHOW ssl"); err != nil || v != "on" {
+		t.Skip("the test server doesn't offer TLS")
+	}
+}
+
 func TestTLSOnBothSides(t *testing.T) {
 	dsn := upstreamDSN(t, "LQO_TEST_DSN")
+	serverTLS(t, dsn)
 	tp := startProxy(t, dsn, "require", true, nil)
 	// Verified against the proxy's own certificate.
 	c := connect(t, tp.via(t, dsn, "verify-full")+"&sslrootcert="+url.QueryEscape(tp.cert))
@@ -398,7 +408,7 @@ func psql(t *testing.T, dsn string, args ...string) (string, error) {
 
 func TestPsqlCopyAndTransactions(t *testing.T) {
 	dsn := upstreamDSN(t, "LQO_TEST_DSN")
-	tp := startProxy(t, dsn, "require", false, nil)
+	tp := startProxy(t, dsn, "prefer", false, nil)
 	via := tp.via(t, dsn, "disable")
 	script := `
 CREATE TEMP TABLE lqo_copy(id int, v text);
@@ -430,9 +440,18 @@ SELECT count(*) FROM lqo_copy;
 	}
 }
 
+func TestNotificationsPassThrough(t *testing.T) {
+	dsn := upstreamDSN(t, "LQO_TEST_DSN")
+	tp := startProxy(t, dsn, "prefer", false, nil)
+	out, err := psql(t, tp.via(t, dsn, "disable"), "-c", "LISTEN lqo_test", "-c", "NOTIFY lqo_test, 'hello'", "-c", "SELECT 1")
+	if err != nil || !strings.Contains(out, `"lqo_test" with payload "hello"`) {
+		t.Errorf("%v\n%s", err, out)
+	}
+}
+
 func TestPsqlOverTLSNeedsChannelBindingOff(t *testing.T) {
 	dsn := upstreamDSN(t, "LQO_TEST_DSN")
-	tp := startProxy(t, dsn, "require", true, nil)
+	tp := startProxy(t, dsn, "prefer", true, nil)
 	via := tp.via(t, dsn, "require")
 	// libpq offers channel binding by default over TLS. The proxy can't
 	// pass it through, and says how to connect instead.

@@ -49,7 +49,7 @@ func newShape(l *Learner) *state.Learned {
 // sample builds a round's result: the default plan at base ms, and each
 // named arm at base times its ratio. A ratio of 1 means the same plan.
 func sample(base float64, ratios map[string]float64) advisor.SampleResult {
-	sr := advisor.SampleResult{BaseMs: base, BaseRuns: []float64{base * 0.99, base, base * 1.01}, BaseRows: 1}
+	sr := advisor.SampleResult{Text: "t", BaseMs: base, BaseRuns: []float64{base * 0.99, base, base * 1.01}, BaseRows: 1}
 	for name, r := range ratios {
 		at := advisor.ArmTiming{Name: name, Rows: 1}
 		if r == 1 {
@@ -108,13 +108,36 @@ func TestNoisyHintIsNotProven(t *testing.T) {
 	}
 }
 
-func TestSlowerOnceIsOut(t *testing.T) {
+func TestSlowerTwiceOnATextIsOut(t *testing.T) {
 	l := newTestLearner()
 	e := newShape(l)
-	for _, r := range []float64{0.5, 0.5, 1.2, 0.5} {
+	for _, r := range []float64{0.5, 0.5, 1.2, 1.3, 0.5} {
 		l.update(e, sample(100, map[string]float64{"good": r}), testArms)
 	}
 	if e.Status == Proven || e.Arms["good"].Out == "" {
+		t.Errorf("status %s, arm %+v", e.Status, e.Arms["good"])
+	}
+}
+
+// A replica busy with other work can make one round look bad. The hint is
+// tried on that text again, and only a second bad result rules it out.
+func TestOneNoisyRoundIsForgiven(t *testing.T) {
+	l := newTestLearner()
+	e := newShape(l)
+	l.update(e, sample(100, map[string]float64{"good": 2.0}), testArms)
+	if e.Arms["good"].Out != "" || e.Arms["good"].Suspect != "t" {
+		t.Fatalf("after one bad round: %+v", e.Arms["good"])
+	}
+	if s := suspectText(e); s != "t" {
+		t.Errorf("the next round should retry the text, got %q", s)
+	}
+	if got := l.choose(e, testArms, "t"); len(got) == 0 || got[0] != 0 {
+		t.Errorf("the suspect hint should be tried first: %v", got)
+	}
+	for i := 0; i < 3; i++ {
+		l.update(e, sample(100, map[string]float64{"good": 0.5}), testArms)
+	}
+	if e.Status != Proven || e.Arms["good"].MaxRatio > 1 {
 		t.Errorf("status %s, arm %+v", e.Status, e.Arms["good"])
 	}
 }
@@ -127,6 +150,10 @@ func TestProvenHintIsDemoted(t *testing.T) {
 	}
 	if e.Status != Proven {
 		t.Fatal("not proven")
+	}
+	l.update(e, sample(100, map[string]float64{"good": 1.5}), testArms)
+	if e.Status != Proven {
+		t.Error("demoted on one bad round")
 	}
 	l.update(e, sample(100, map[string]float64{"good": 1.5}), testArms)
 	if e.Status == Proven || e.Proven != "" || l.stats.Proven != 0 {
@@ -144,6 +171,10 @@ func TestDifferentRowsAndTimeoutsRuleOut(t *testing.T) {
 		} else {
 			sr.Arms[i].TimedOut = true
 		}
+	}
+	l.update(e, sr, testArms)
+	if e.Arms["bad"].Out != "" {
+		t.Error("one time-out ruled the hint out without a second look")
 	}
 	l.update(e, sr, testArms)
 	if !strings.Contains(e.Arms["good"].Out, "rows") || !strings.Contains(e.Arms["bad"].Out, "time limit") {
@@ -182,7 +213,7 @@ func TestThompsonFavoursTheEvidence(t *testing.T) {
 	}
 	counts := map[int]int{}
 	for i := 0; i < 1000; i++ {
-		for _, a := range l.choose(e, testArms) {
+		for _, a := range l.choose(e, testArms, "t") {
 			counts[a]++
 		}
 	}
@@ -200,7 +231,7 @@ func TestUntriedHintsGetTheirTurn(t *testing.T) {
 	e := newShape(l)
 	seen := map[int]bool{}
 	for i := 0; i < 50; i++ {
-		for _, a := range l.choose(e, testArms) {
+		for _, a := range l.choose(e, testArms, "t") {
 			seen[a] = true
 		}
 	}
@@ -315,4 +346,106 @@ func TestLearnsTheDemoTrapThroughTheProxy(t *testing.T) {
 		}
 	}
 	conn.Exec(ctx, "DROP SCHEMA "+schema+" CASCADE")
+}
+
+// Losing the replica pauses learning and nothing else: the application's
+// traffic keeps flowing, and learning picks up again when the replica is
+// back.
+func TestReplicaLossPausesLearningOnly(t *testing.T) {
+	dsn := os.Getenv("LQO_TEST_DSN")
+	if dsn == "" {
+		t.Skip("LQO_TEST_DSN not set")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg, _ := pgwire.ParseConfig(dsn)
+	up := *cfg
+	up.SSLMode = "disable"
+
+	// The application's proxy.
+	col := watch.NewCollector()
+	defer col.Close()
+	appLn, _ := proxy.Listen("127.0.0.1:0", 0)
+	app := proxy.New(proxy.Config{Upstream: &up, Watch: col})
+	go app.Serve(ctx, appLn)
+	defer app.Shutdown(time.Second)
+
+	// The "replica": another proxy in front of the same server, which the
+	// test can take away and bring back on the same port.
+	repLn, _ := proxy.Listen("127.0.0.1:0", 0)
+	repAddr := repLn.Addr().String()
+	startReplica := func(ln net.Listener) (*proxy.Server, context.CancelFunc) {
+		rctx, rcancel := context.WithCancel(ctx)
+		s := proxy.New(proxy.Config{Upstream: &up})
+		go s.Serve(rctx, ln)
+		return s, rcancel
+	}
+	rep, stopRep := startReplica(repLn)
+
+	repCfg := *cfg
+	host, port, _ := net.SplitHostPort(repAddr)
+	repCfg.Host = host
+	repCfg.Port, _ = strconv.Atoi(port)
+	repCfg.SSLMode = "disable"
+
+	u, _ := url.Parse(dsn)
+	u.Host = appLn.Addr().String()
+	appCfg, _ := pgwire.ParseConfig(u.String())
+	conn, err := pgwire.Connect(ctx, appCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	q := func(i int) error {
+		_, err := conn.ExecOne(ctx, "SELECT count(*) FROM pg_class c JOIN pg_attribute a ON a.attrelid = c.oid WHERE a.attnum > "+strconv.Itoa(i%3))
+		return err
+	}
+	for i := 0; i < 5; i++ {
+		if err := q(i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	col.Flush()
+
+	l, _, err := New(col, Options{Replica: &repCfg, AllowPrimary: true, MinMs: 0, MinCalls: 1, Budget: 1, Repeat: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ldone := make(chan error, 1)
+	go func() { ldone <- l.Run(ctx) }()
+	waitFor := func(what string, ok func(Stats) bool) {
+		t.Helper()
+		deadline := time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			if ok(l.Stats()) {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for %s: %+v", what, l.Stats())
+	}
+	waitFor("a first round", func(s Stats) bool { return s.Rounds > 0 })
+
+	// Take the replica away, connections and all.
+	stopRep()
+	rep.Shutdown(0)
+	waitFor("learning to notice", func(s Stats) bool { return s.ReplicaDown })
+	for i := 0; i < 20; i++ {
+		if err := q(i); err != nil {
+			t.Fatalf("application query failed while the replica was gone: %v", err)
+		}
+	}
+
+	// Bring it back on the same port.
+	ln, err := net.Listen("tcp", repAddr)
+	if err != nil {
+		t.Skipf("couldn't take the port back: %v", err)
+	}
+	_, stopRep2 := startReplica(ln)
+	defer stopRep2()
+	waitFor("learning to resume", func(s Stats) bool { return !s.ReplicaDown })
+	cancel()
+	if err := <-ldone; err != nil {
+		t.Errorf("Run: %v", err)
+	}
 }

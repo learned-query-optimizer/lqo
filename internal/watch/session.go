@@ -58,6 +58,11 @@ type session struct {
 var _ proxy.Session = (*session)(nil)
 
 func (s *session) FromClient(typ byte, body []byte) {
+	switch typ {
+	case 'Q', 'P', 'B', 'E', 'S', 'D', 'C':
+	default:
+		return // COPY data and the like
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
@@ -170,6 +175,11 @@ func (s *session) push(p *pending) {
 }
 
 func (s *session) FromServer(typ byte, body []byte) {
+	switch typ {
+	case 't', 'C', 'I', 's', 'E', 'Z':
+	default:
+		return // rows and the like: nothing to note, and many of them
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch typ {
@@ -197,9 +207,6 @@ func (s *session) FromServer(typ byte, body []byte) {
 			}
 		}
 		st.oids = oids
-	case 'n', 'T':
-		// The reply to a Describe of a portal, or the end of one for a
-		// statement: nothing to note.
 	case 'C', 'I', 's':
 		if f := s.front(); f != nil && f.kind == pendExec {
 			s.done(f)

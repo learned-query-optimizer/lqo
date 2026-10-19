@@ -42,8 +42,8 @@ jobs:
           go-version: "1.26.x"
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
-      - run: go test -count=1 -v ./... 2>&1 | tee test-output.txt; s=${PIPESTATUS[0]}; [ "$s" -eq 0 ] || sh scripts/ci-annotate.sh test-output.txt; exit "$s"
-      - run: go test -race -short -count=1 -v ./... 2>&1 | tee race-output.txt; s=${PIPESTATUS[0]}; [ "$s" -eq 0 ] || sh scripts/ci-annotate.sh race-output.txt; exit "$s"
+      - run: go test -p 1 -count=1 -v ./... 2>&1 | tee test-output.txt; s=${PIPESTATUS[0]}; [ "$s" -eq 0 ] || sh scripts/ci-annotate.sh test-output.txt; exit "$s"
+      - run: go test -p 1 -race -short -count=1 -v ./... 2>&1 | tee race-output.txt; s=${PIPESTATUS[0]}; [ "$s" -eq 0 ] || sh scripts/ci-annotate.sh race-output.txt; exit "$s"
       - name: Smoke-test a release build against the server
         run: |
           CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o lqo ./cmd/lqo

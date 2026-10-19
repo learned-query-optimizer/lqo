@@ -35,6 +35,7 @@ const usage = `lqo finds the PostgreSQL queries a planner setting makes clearly 
 
 Usage:
   lqo advise [flags] WORKLOAD...   try a workload's queries with each hint and report
+  lqo serve [flags]                run as a proxy, measure live queries, learn on a replica
   lqo show [flags]                 print what the state file holds
   lqo report [flags] REPORT.json   print a saved JSON report as text or Markdown
   lqo hints [--hints full]         list the hints lqo tries
@@ -44,7 +45,7 @@ Usage:
 A workload is a .sql file of statements, or a PostgreSQL server log
 (stderr, csvlog or jsonlog) with log_min_duration_statement or auto_explain.
 
-Run "lqo advise -h" for the advise flags. The connection string comes from
+Run "lqo advise -h" or "lqo serve -h" for their flags. The connection string comes from
 --dsn, then the LQO_DSN variable, then the usual PG* variables.
 Documentation: https://lqo.net
 `
@@ -71,6 +72,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "advise":
 		err = cmdAdvise(ctx, args[1:], stdout, stderr)
+	case "serve":
+		err = cmdServe(ctx, args[1:], stdout, stderr)
 	case "show":
 		err = cmdShow(args[1:], stdout, stderr)
 	case "report":
@@ -348,11 +351,18 @@ func cmdShow(args []string, stdout, stderr io.Writer) error {
 		_, err = stdout.Write(b)
 		return err
 	}
-	if len(f.Shapes) == 0 {
-		fmt.Fprintf(stdout, "%s holds nothing yet. Run lqo advise first.\n", *statePath)
+	if len(f.Shapes) == 0 && len(f.Serve) == 0 {
+		fmt.Fprintf(stdout, "%s holds nothing yet. Run lqo advise or lqo serve first.\n", *statePath)
 		return nil
 	}
-	fmt.Fprintf(stdout, "%s, updated %s: %d shapes\n", *statePath, f.Updated.Format("2006-01-02 15:04 UTC"), len(f.Shapes))
+	if len(f.Serve) > 0 {
+		showServe(stdout, *statePath, f)
+		if len(f.Shapes) == 0 {
+			return nil
+		}
+		fmt.Fprintln(stdout)
+	}
+	fmt.Fprintf(stdout, "%s, updated %s: %d shapes from lqo advise\n", *statePath, f.Updated.Format("2006-01-02 15:04 UTC"), len(f.Shapes))
 	for _, e := range f.Sorted() {
 		fmt.Fprintf(stdout, "\n%s  %s\n", e.ID[:8], sqltext.OneLine(e.Example, 70))
 		fmt.Fprintf(stdout, "  database %s, tested %s\n", e.Database, e.Tested.Format("2006-01-02 15:04 UTC"))

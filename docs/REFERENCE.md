@@ -8,8 +8,9 @@ The [README](../README.md) is the manual. This page has the details it leaves ou
 4. [The decision rule, exactly](#the-decision-rule-exactly)
 5. [The JSON report](#the-json-report)
 6. [The state file](#the-state-file)
-7. [Permissions](#permissions)
-8. [Exit codes and signals](#exit-codes-and-signals)
+7. [lqo serve](#lqo-serve)
+8. [Permissions](#permissions)
+9. [Exit codes and signals](#exit-codes-and-signals)
 
 ## Connection strings
 
@@ -202,6 +203,146 @@ old file or the new one, whole. Temporary files a killed save left behind are
 deleted by the next save once they are ten minutes old. A file that can't be read
 is renamed to `lqo-state.json.damaged-<time>` and a new one is started.
 
+## lqo serve
+
+### What passes through
+
+LQO relays the PostgreSQL wire protocol one whole message at a time and changes
+nothing in it, with two exceptions during login, both described below. It handles:
+
+- the startup message, `SSLRequest` (TLS ended at LQO when it has a certificate,
+  refused with `N` when it hasn't), direct TLS as libpq 17's
+  `sslnegotiation=direct` sends it (ALPN `postgresql` required), and
+  `GSSENCRequest` (always refused, so the client carries on without it);
+- logins: trust, password, md5 and SCRAM-SHA-256 pass through to the server;
+- simple and extended queries, pipelined or not, `COPY` both ways, notifications,
+  notices, and anything else after login;
+- cancel requests, forwarded to the server: the key in them is the one the server
+  gave the client, which LQO passed on unchanged.
+
+The two changes: LQO removes `SCRAM-SHA-256-PLUS` from the server's list of login
+methods, because channel binding ties a login to one TLS connection and LQO makes
+two. And when a client that connected to LQO with TLS says it supports channel
+binding (`y` in its first SCRAM message) while LQO's own connection to the server
+uses TLS, LQO ends the login with a message saying to use
+`channel_binding=disable`, because the server would take that for a downgrade
+attack and refuse it with a less helpful error.
+
+A startup packet over 10,000 bytes or a message over about 1 GB ends the
+connection. A client gets 60 seconds to log in.
+
+### What is measured
+
+For each statement LQO notes when the request went to the server and when its
+reply finished: `CommandComplete`, `EmptyQueryResponse`, `PortalSuspended` or an
+error for an extended-protocol `Execute`; `ReadyForQuery` for a simple `Query`,
+which counts once however many statements it holds. A pipelined request is timed
+from when the one before it finished, so it isn't charged for waiting in line.
+
+Statements are grouped into shapes by the same fingerprint as `lqo advise`, per
+database. For each shape LQO keeps the call count, total time, errors, a
+histogram for the median and 95th percentile, and up to 8 complete texts, the
+slowest seen. A prepared statement's text gets its parameters' values written
+in as literals: text-format values quoted, with a cast when the type is known;
+binary values for the common types (booleans, integers, floats, text, bytea,
+uuid, date, timestamp, json, jsonb) decoded; a binary value of any other type
+means that call gives no text. A shape that isn't a plain read is measured and
+never tried, for the same reasons as in `lqo advise`.
+
+Measuring never makes traffic wait. Sessions hand their reports to the collector
+over a buffer of 8,192; when it's full, reports are dropped and counted
+(`watch.dropped` in the status JSON). LQO tracks at most 5,000 shapes, dropping
+the tenth with the least total time when it needs room.
+
+### How learning works
+
+Each round the learner picks one shape: the most total live time, discounted by
+how often it has been tried. Shapes under `--min-ms` at the median or seen fewer
+than 3 times are left alone. It takes one of the shape's texts in turn and runs
+it on the replica under the default plan and under three hints, exactly as
+`lqo advise` runs one sample: plan each, a warm-up run, then three timed rounds in
+shuffled order, each run in its own `READ ONLY` transaction that is rolled back,
+and a check afterwards that nothing was left behind.
+
+The three hints are chosen by Thompson sampling. For each hint, the evidence is
+the log of its median time over the default plan's, one value per text. LQO draws
+a plausible average from each hint's evidence (a normal distribution around the
+mean, with the standard error as its width, never narrower than 0.05 over the
+square root of the count; a wide guess around no change for a hint never tried)
+and tries the three lowest draws.
+
+What a result does to a hint:
+
+| Result | Effect |
+|---|---|
+| an error | ruled out |
+| a different number of rows, or rows that vary between runs | ruled out |
+| more than 10% slower, or the time limit hit | tried again on the same text next round; ruled out if it happens again |
+| the same plan as the default | counted as no change; ruled out after three texts of only that |
+| otherwise | its ratio is added to the evidence |
+
+A hint is proven when it isn't ruled out or waiting for a second look, has at
+least 3 results, beat every run of the default plan with its slowest run on at
+least one text, has an average ratio at most 1 − `--min-gain`, has no result over
+1 + tolerance, and the upper end of its 95% one-sided interval is at most
+1 − half of `--min-gain`. Between proven hints the faster wins; within 2%, the
+one with fewer settings. A shape whose hints are all ruled out, or all
+confidently save less than `--min-gain`, is marked `keep` and tried again a day
+later. A proven hint keeps being checked on new texts now and then, and loses its
+standing if a check rules it out.
+
+After each round the learner waits so the replica is busy at most `--budget` of
+the time. If the replica can't be reached, learning pauses, retries after 1
+second, then 2, up to a minute, and traffic is untouched.
+
+### The status page
+
+`GET /` is a plain-text summary; `GET /status` is JSON:
+
+| Field | What it holds |
+|---|---|
+| `lqo_version`, `mode`, `started` | the running server; `mode` is `shadow` in 0.2 |
+| `connections_open`, `connections_total` | client connections |
+| `watch` | `statements` measured, `dropped` measurements, `shapes` |
+| `learning` | `rounds`, `trials`, `busy_ms`, `proven`, and `replica_down` with `last_error` while the replica can't be reached; absent without `--replica` |
+| `shapes[]` | each shape as in the state file below |
+
+### In the state file
+
+`lqo serve` keeps what it learns under `serve` in the same state file, keyed by
+database and shape ID, and replaces only that part when it saves, so findings
+from `lqo advise` in the same file stay:
+
+```json
+"serve": {
+  "shop/891f0819ce6bf4ec": {
+    "key": "shop/891f0819ce6bf4ec",
+    "id": "891f0819ce6bf4ec",
+    "database": "shop",
+    "normalized": "select sum ( l . qty ) from ...",
+    "example": "SELECT sum(l.qty) FROM ... WHERE c.attrs->>'tier' = 'gold' ...",
+    "calls": 1204, "total_ms": 1288280, "p50_ms": 1061, "p95_ms": 1640,
+    "status": "proven", "rounds": 7, "texts_tried": 7,
+    "proven": "no nested loop",
+    "settings": [{"name": "enable_nestloop", "value": "off"}],
+    "gain": 0.36,
+    "arms": {"no nested loop": {"n": 4, "mean_log_ratio": -0.45, "strict_wins": 3, ...}}
+  }
+}
+```
+
+`status` is `learning`, `proven`, `keep`, `skipped` (not a plain read) or `error`
+(the default plan failed on three texts in a row). `example` holds a real text
+with its values, as the application sent it; keep the state file where you'd keep
+your logs. It's saved every `--save-every` and on shutdown, the same atomic way as
+always.
+
+### Signals
+
+On Ctrl-C or SIGTERM, `lqo serve` stops accepting connections, waits up to
+`--grace` for open ones to end, closes the rest, stops learning, saves the state
+and exits.
+
 ## Permissions
 
 LQO needs to connect, read `pg_settings`, and run `EXPLAIN ANALYZE` on the
@@ -220,6 +361,11 @@ query ID and nothing else changes.
 | 0 | the run finished (whatever it found) |
 | 1 | an error: a file it couldn't read, a connection that failed, a lost connection |
 | 2 | a usage error, or a refusal such as a primary without `--allow-primary` |
+
+`lqo serve` exits with 0 after a clean shutdown, and with 1 when it can't listen,
+or when learning had stopped because a trial didn't stay inside its transaction
+(which should never happen; the proxy keeps serving in that case, and only
+learning stops).
 
 On Ctrl-C or SIGTERM, `lqo advise` cancels the running trial on the server, rolls
 it back, saves the state, prints the report for the shapes it finished, marked as

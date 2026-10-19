@@ -15,7 +15,11 @@ It doesn't replace PostgreSQL's optimizer. It steers it, with PostgreSQL's own
 planner switches (`enable_nestloop`, `enable_hashjoin` and the rest), so every
 plan it suggests is one PostgreSQL already knows how to run.
 
-Version 0.1 is the advisor. It reports and changes nothing on the server.
+LQO works two ways. `lqo advise` reads a SQL file or a server log and tests
+what's in it. `lqo serve`, new in 0.2, sits between your application and the
+database as a proxy, measures every query as it runs, and learns on a replica
+which settings help which queries. Neither changes anything on the server: they
+report, and you decide.
 
 - Website: https://lqo.net
 - License: Apache 2.0
@@ -29,10 +33,11 @@ Version 0.1 is the advisor. It reports and changes nothing on the server.
 3. [Use it on your database](#use-it-on-your-database)
 4. [Reading the report](#reading-the-report)
 5. [How LQO decides](#how-lqo-decides)
-6. [What LQO will and won't run](#what-lqo-will-and-wont-run)
-7. [Commands](#commands)
-8. [What 0.1 doesn't do](#what-01-doesnt-do)
-9. [Building and testing](#building-and-testing)
+6. [Learn from live traffic: lqo serve](#learn-from-live-traffic-lqo-serve)
+7. [What LQO will and won't run](#what-lqo-will-and-wont-run)
+8. [Commands](#commands)
+9. [What 0.2 doesn't do](#what-02-doesnt-do)
+10. [Building and testing](#building-and-testing)
 
 ## Install
 
@@ -270,6 +275,74 @@ The settings it tries (`lqo hints` lists them):
 `--hints full` tries instead the 48 combinations of join and scan methods used in
 the Bao research paper. It tries more combinations and takes longer.
 
+## Learn from live traffic: lqo serve
+
+`lqo advise` needs a workload you give it. `lqo serve` finds its own: it runs as a
+proxy in front of your database, your application connects to it instead, and it
+passes every message through unchanged. On the side it times every query, groups
+them into shapes, keeps a few real texts of each with their values, and tries the
+slowest shapes under the hints on a replica.
+
+```sh
+lqo serve --dsn "postgres://db1:5432/shop?sslmode=require" \
+          --replica "postgres://lqo@replica1:5432/shop?sslmode=require"
+```
+
+Then point the application at LQO, on port 6433 by default, with its usual user
+and password. LQO holds no passwords: logins go through to the server. `--dsn`
+only needs the server's address and TLS settings; `--replica` needs a login, like
+`lqo advise`.
+
+The status page, on `http://127.0.0.1:6434/` by default, shows what it has seen and
+learned, and `/status` has the same as JSON. `lqo show` reads it from the state
+file afterwards.
+
+```
+lqo 0.2.0, shadow mode, up 2h13m
+connections: 14 open, 2,210 in all
+statements measured: 1,904,227 in 212 shapes
+learning: 96 rounds, 288 hint trials, replica busy 31m, 3 proven
+
+891f0819  shop  SELECT sum(l.qty) FROM customers c JOIN orders o ON …
+  1,204 calls, 1,288,280 ms in all, median 1,061 ms, p95 1,640 ms
+  proven: "no nested loop", about 36% faster on the replica
+    SET LOCAL enable_nestloop = off;
+```
+
+**How it learns.** Trying all 13 hints on every text would keep the replica busy
+for nothing, so LQO tries three at a time, picked by Thompson sampling: each hint's
+results so far say how much faster it probably is and how sure that is, LQO draws
+a guess from each, and tries the best guesses. Hints that keep winning get tried
+more, hints that lose stop being tried, and untried hints still get a turn. A hint
+is proven only by the same rule as `lqo advise`, on at least three texts: never
+more than 10% slower on any, the same rows, no time-outs, faster than every run of
+the default plan at least once, and 20% faster on average, with enough certainty.
+A bad result on one text is tried again before it counts, because a replica busy
+with other work can make one round look bad. A proven hint that fails a later
+check loses its standing.
+
+**What it costs.** The learner keeps the replica busy at most a quarter of the time
+(`--budget`). The proxy adds a little time to every query, mostly the extra network
+hop: [test/results/serve/overhead.txt](test/results/serve/overhead.txt) has the
+measurements. Measuring never holds traffic up: if LQO falls behind, it drops
+measurements, never queries.
+
+**What it changes: nothing.** 0.2 runs in shadow mode only. Applying proven hints
+to live queries is planned for 0.3.
+
+**Connecting.** Plain and prepared queries, pipelining, `COPY`, cancel requests
+and notifications pass through. With `--tls-cert` and
+`--tls-key`, clients can connect with TLS; LQO ends that TLS and makes its own
+connection to the server, with TLS as `--dsn` says. That's what lets it see the
+queries, and it means SCRAM channel binding can't work through it: a client that
+connects to LQO with TLS needs `channel_binding=disable`. The simplest setup runs
+LQO next to the application, over a Unix socket (`--listen /var/run/lqo`) or
+localhost, and keeps TLS between LQO and the database.
+
+If the replica goes away, learning pauses and traffic carries on. LQO saves what it
+has learned to the state file as it goes; after a crash or a restart it picks up
+where it was.
+
 ## What LQO will and won't run
 
 LQO runs a statement only if it is a read: it starts with `SELECT`, `WITH`,
@@ -307,6 +380,7 @@ application's locks.
 
 ```
 lqo advise [flags] WORKLOAD...   try a workload's queries with each hint and report
+lqo serve [flags]                run as a proxy, measure live queries, learn on a replica
 lqo show [flags]                 print what the state file holds
 lqo report [flags] REPORT.json   print a saved JSON report as text or Markdown
 lqo hints [--hints full]         list the hints lqo tries
@@ -336,17 +410,40 @@ lqo version                      print the version
 | `--no-state` | off | don't write the state file |
 | `--quiet` | off | no progress lines |
 
+`lqo serve` flags:
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--dsn` | `LQO_DSN`, then `PG*` | the database server: address and TLS settings |
+| `--replica` | none | a replica to learn on, with a login; without it LQO only measures |
+| `--allow-primary` | off | let `--replica` be a primary |
+| `--listen` | `127.0.0.1` | address to listen on, or a directory for a Unix socket |
+| `--port` | 6433 | port to listen on |
+| `--tls-cert`, `--tls-key` | none | certificate for clients that connect with TLS |
+| `--status` | `127.0.0.1:6434` | status page address, `""` for none |
+| `--hints` | `standard` | `standard` (13 hints) or `full` (48) |
+| `--min-gain` | 20 | percent of the time a hint must save |
+| `--min-ms` | 5 | don't try shapes whose median time is under this |
+| `--budget` | 25 | percent of the time the learner may keep the replica busy |
+| `--max-time` | `30s` | stop a trial of the default plan after this long |
+| `--set name=value` | | session setting for every trial, may repeat |
+| `--state` | `lqo-state.json` | state file |
+| `--no-state` | off | don't write the state file |
+| `--save-every` | `30s` | how often to save while learning |
+| `--grace` | `30s` | on shutdown, how long to wait for open connections |
+| `--quiet` | off | log only errors |
+
 Exit codes: 0 when the run finished, 1 on an error, 2 for a usage error or a
 refusal, such as a primary without `--allow-primary`.
 
 [docs/REFERENCE.md](docs/REFERENCE.md) has the details: workload formats, the
 JSON report, the state file and the connection settings.
 
-## What 0.1 doesn't do
+## What 0.2 doesn't do
 
-- **It doesn't change anything.** You apply the suggestions. Applying them
-  automatically, and backing them out when they stop winning, is planned for a
-  later version.
+- **It doesn't change anything.** You apply the suggestions. `lqo serve` applying
+  proven hints to live queries, and backing them out when they stop winning, is
+  planned for 0.3.
 - **It doesn't learn across shapes yet.** Each shape is tested on its own. A new
   shape needs its own run.
 - **Only planner switches.** No join-order hints beyond "as written", and no
@@ -362,11 +459,12 @@ go test ./...
 ```
 
 The tests that need a server read `LQO_TEST_DSN`, a superuser connection on a test
-database, and skip without it. They create the schemas `lqo_test_adv` and
-`lqo_demo`.
+database, and skip without it. They create the schemas `lqo_test_adv`,
+`lqo_test_learn` and `lqo_demo`. Run the packages one at a time, so the timing
+tests don't share the server with each other:
 
 ```sh
-LQO_TEST_DSN="postgres://postgres:secret@localhost/lqo_test" go test ./...
+LQO_TEST_DSN="postgres://postgres:secret@localhost/lqo_test" go test -p 1 ./...
 ```
 
 Among them: writes are never run, even ones that get past the statement check;
@@ -374,7 +472,14 @@ settings never outlive a trial; a slower plan is never suggested and a far slowe
 one is stopped at the time limit; a query whose rows change between runs gets no
 suggestion; an interrupted run stops within seconds; the state file stays whole
 when the writing process is killed 40 times; and the demo benchmark, where LQO must
-find the trap and leave the other shapes alone.
+find the trap and leave the other shapes alone. For `lqo serve`: results through
+the proxy match results straight from the server, for plain and prepared queries,
+errors, transactions, `COPY`, notifications, cancel requests, md5 and SCRAM logins
+and TLS on both sides; psql and pgbench, pipelining included, work through it;
+the learner finds the demo trap from traffic sent through the proxy; losing the
+replica pauses learning while queries carry on; and `lqo serve` killed with
+SIGKILL 10 times while saving leaves its state file whole and keeps what it
+learned.
 
 `sh scripts/record-tests.sh` runs them all and writes the output to
 [test/results/](test/results/). The Join Order Benchmark, 113 queries in 94 shapes
