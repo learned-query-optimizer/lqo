@@ -26,7 +26,7 @@ on:
         default: standard
       runner:
         description: "runner label"
-        default: ubuntu-latest
+        default: ubuntu-24.04
       out:
         description: "results folder under test/results"
         default: job-join-hints
@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   job:
-    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    runs-on: ${{ inputs.runner || 'ubuntu-24.04' }}
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v7
@@ -58,7 +58,10 @@ jobs:
           echo "work_mem = 64MB" | sudo tee -a "$conf"
           echo "effective_cache_size = 10GB" | sudo tee -a "$conf"
           sudo apt-get update -q
-          sudo apt-get install -y -q postgresql-16-pg-hint-plan
+          v=$(ls /usr/lib/postgresql | sort -n | tail -1)
+          sudo apt-get install -y -q postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q "postgresql-$v-pg-hint-plan"
           echo "shared_preload_libraries = 'pg_hint_plan'" | sudo tee -a "$conf"
           sudo systemctl restart postgresql.service
           sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'lqo'" -c "CREATE DATABASE imdb"
@@ -79,7 +82,7 @@ jobs:
             echo "Nothing changed."
             exit 0
           fi
-          git commit -m "Record Join Order Benchmark results (${{ inputs.hints || 'standard' }} hints, ${{ inputs.runner || 'ubuntu-latest' }})"
+          git commit -m "Record Join Order Benchmark results (${{ inputs.hints || 'standard' }} hints, ${{ inputs.runner || 'ubuntu-24.04' }})"
           for i in 1 2 3; do
             git pull --rebase origin main && git push origin HEAD:main && exit 0
             sleep 10
