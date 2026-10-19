@@ -339,7 +339,7 @@ func TestSyntheticBenchmark(t *testing.T) {
 	if err := a.Run(ctx, workload.Group(st), rep); err != nil {
 		t.Fatal(err)
 	}
-	trap := find(rep, "SELECT sum(l.qty)")
+	trap := find(rep, "SELECT sum(l.qty * p.price)")
 	if trap == nil || trap.Verdict != Faster {
 		t.Fatalf("the nested-loop trap wasn't found: %+v", trap)
 	}

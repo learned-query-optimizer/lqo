@@ -86,13 +86,13 @@ func TestSessionFollowsExtendedProtocol(t *testing.T) {
 	s := c.Open(map[string]string{"user": "app", "database": "shop"})
 	// Parse with one int4 parameter, Bind in text, Execute, then a second
 	// Bind and Execute pipelined before Sync; the second fails.
-	s.FromClient('P', msg("s1", "SELECT * FROM t WHERE id = $1", int16(1), int32(23)))
-	s.FromClient('B', msg("", "s1", int16(0), int16(1), int32(2), []byte("17"), int16(0)))
-	s.FromClient('E', msg("", int32(0)))
-	s.FromClient('B', msg("", "s1", int16(0), int16(1), int32(-1), int16(0)))
-	s.FromClient('E', msg("", int32(0)))
-	s.FromClient('E', msg("", int32(0)))
-	s.FromClient('S', nil)
+	fc(s, 'P', msg("s1", "SELECT * FROM t WHERE id = $1", int16(1), int32(23)))
+	fc(s, 'B', msg("", "s1", int16(0), int16(1), int32(2), []byte("17"), int16(0)))
+	fc(s, 'E', msg("", int32(0)))
+	fc(s, 'B', msg("", "s1", int16(0), int16(1), int32(-1), int16(0)))
+	fc(s, 'E', msg("", int32(0)))
+	fc(s, 'E', msg("", int32(0)))
+	fc(s, 'S', nil)
 	s.FromServer('1', nil)
 	s.FromServer('2', nil)
 	s.FromServer('D', nil)
@@ -101,7 +101,7 @@ func TestSessionFollowsExtendedProtocol(t *testing.T) {
 	s.FromServer('E', msg("SERROR", "C42P01", ""))
 	s.FromServer('Z', []byte{'I'})
 	// A simple query with two statements counts once.
-	s.FromClient('Q', msg("SELECT 1; SELECT 2"))
+	fc(s, 'Q', msg("SELECT 1; SELECT 2"))
 	s.FromServer('C', msg("SELECT 1"))
 	s.FromServer('C', msg("SELECT 1"))
 	s.FromServer('Z', []byte{'I'})
@@ -133,18 +133,18 @@ func TestBinaryParamsTakeTypesFromDescribe(t *testing.T) {
 	c := NewCollector()
 	defer c.Close()
 	s := c.Open(map[string]string{"user": "app"})
-	s.FromClient('P', msg("", "SELECT $1 + 1", int16(0)))
-	s.FromClient('D', msg("S"+""))
-	s.FromClient('S', nil)
+	fc(s, 'P', msg("", "SELECT $1 + 1", int16(0)))
+	fc(s, 'D', msg("S"+""))
+	fc(s, 'S', nil)
 	s.FromServer('1', nil)
 	s.FromServer('t', msg(int16(1), int32(20)))
 	s.FromServer('T', nil)
 	s.FromServer('Z', []byte{'I'})
 	v := make([]byte, 8)
 	binary.BigEndian.PutUint64(v, 5)
-	s.FromClient('B', msg("", "", int16(1), int16(1), int16(1), int32(8), v, int16(0)))
-	s.FromClient('E', msg("", int32(0)))
-	s.FromClient('S', nil)
+	fc(s, 'B', msg("", "", int16(1), int16(1), int16(1), int32(8), v, int16(0)))
+	fc(s, 'E', msg("", int32(0)))
+	fc(s, 'S', nil)
 	s.FromServer('2', nil)
 	s.FromServer('C', msg("SELECT 1"))
 	s.FromServer('Z', []byte{'I'})
@@ -159,12 +159,12 @@ func TestPipelinedTimesDontIncludeTheWait(t *testing.T) {
 	c := NewCollector()
 	defer c.Close()
 	s := c.Open(map[string]string{"user": "app"}).(*session)
-	s.FromClient('P', msg("a", "SELECT pg_sleep(0)", int16(0)))
+	fc(s, 'P', msg("a", "SELECT pg_sleep(0)", int16(0)))
 	for i := 0; i < 3; i++ {
-		s.FromClient('B', msg("", "a", int16(0), int16(0), int16(0)))
-		s.FromClient('E', msg("", int32(0)))
+		fc(s, 'B', msg("", "a", int16(0), int16(0), int16(0)))
+		fc(s, 'E', msg("", int32(0)))
 	}
-	s.FromClient('S', nil)
+	fc(s, 'S', nil)
 	for i := 0; i < 3; i++ {
 		time.Sleep(20 * time.Millisecond)
 		s.FromServer('C', msg("SELECT 1"))
@@ -304,7 +304,7 @@ func FuzzSession(f *testing.F) {
 				b = b[i%len(b):]
 			}
 			if i%2 == 0 {
-				s.FromClient(typ, b)
+				fc(s, typ, b)
 			} else {
 				s.FromServer(typ, b)
 			}
@@ -312,3 +312,6 @@ func FuzzSession(f *testing.F) {
 		s.Close()
 	})
 }
+
+// fc sends a client message with nothing buffered after it.
+func fc(s proxy.Session, typ byte, b []byte) proxy.Action { return s.FromClient(typ, b, nil) }

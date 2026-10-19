@@ -69,22 +69,32 @@ type Config struct {
 }
 
 // Watcher is told about the traffic the proxy relays. The proxy calls it on
-// the relaying goroutine, so it must return quickly and must not keep body,
-// which is reused after the call.
+// the relaying goroutine, so it must return quickly and must not keep body
+// or ahead, which are reused after the call.
 type Watcher interface {
 	// Open is called once a client has logged in; the returned value is
 	// passed back with every message of that session.
 	Open(params map[string]string) Session
 }
 
-// Session watches one client connection.
+// Session watches one client connection, and may steer it.
 type Session interface {
-	// FromClient is called for each message the client sends.
-	FromClient(typ byte, body []byte)
+	// FromClient is called for each message the client sends, with the
+	// bytes the client has already sent after it, as far as the proxy has
+	// read them.
+	FromClient(typ byte, body, ahead []byte) Action
 	// FromServer is called for each message the server sends.
-	FromServer(typ byte, body []byte)
+	FromServer(typ byte, body []byte) Action
 	// Close is called when the connection ends.
 	Close()
+}
+
+// Action tells the proxy what to do with a message. The zero value passes
+// it on unchanged, which is all a session in shadow mode ever asks.
+type Action struct {
+	Before []byte // whole messages to send ahead of this one
+	Body   []byte // a replacement body, when not nil
+	Drop   bool   // don't pass this message on
 }
 
 // Server is a running proxy.
@@ -306,6 +316,7 @@ func (s *Server) handle(ctx context.Context, raw net.Conn) {
 	defer s.sessions.Add(-1)
 
 	var watch Session
+	var watchBroken atomic.Bool
 	sasl := &saslState{upTLS: upTLS}
 	var loggedIn atomic.Bool
 	ready := make(chan struct{})
@@ -319,11 +330,12 @@ func (s *Server) handle(ctx context.Context, raw net.Conn) {
 	errc := make(chan error, 2)
 	// Server to client.
 	go func() {
-		errc <- relay(clW, upR, func(typ byte, body []byte) ([]byte, error) {
+		errc <- relay(clW, upR, func(typ byte, body, _ []byte) (Action, error) {
 			if !loggedIn.Load() {
 				switch typ {
 				case 'R':
-					return sasl.fromServer(body)
+					out, err := sasl.fromServer(body)
+					return Action{Body: out}, err
 				case 'Z':
 					// Logged in: no more deadline, and the watcher
 					// starts.
@@ -334,22 +346,22 @@ func (s *Server) handle(ctx context.Context, raw net.Conn) {
 					loggedIn.Store(true)
 					readyOnce.Do(func() { close(ready) })
 				}
-				return body, nil
+				return Action{}, nil
 			}
-			if watch != nil {
-				watch.FromServer(typ, body)
+			if watch != nil && !watchBroken.Load() {
+				return s.guard(&watchBroken, func() Action { return watch.FromServer(typ, body) }), nil
 			}
-			return body, nil
+			return Action{}, nil
 		})
 	}()
 	// Client to server.
 	go func() {
-		errc <- relay(upW, br, func(typ byte, body []byte) ([]byte, error) {
+		errc <- relay(upW, br, func(typ byte, body, ahead []byte) (Action, error) {
 			if !loggedIn.Load() {
 				if typ == 'p' {
 					if err := sasl.fromClient(body); err != nil {
 						sendFatal(client, "28000", err.Error())
-						return nil, err
+						return Action{}, err
 					}
 				}
 				if typ != 'p' && typ != 'X' {
@@ -358,14 +370,14 @@ func (s *Server) handle(ctx context.Context, raw net.Conn) {
 					select {
 					case <-ready:
 					case <-stopped:
-						return nil, io.EOF
+						return Action{}, io.EOF
 					}
 				}
 			}
-			if loggedIn.Load() && watch != nil {
-				watch.FromClient(typ, body)
+			if loggedIn.Load() && watch != nil && !watchBroken.Load() {
+				return s.guard(&watchBroken, func() Action { return watch.FromClient(typ, body, ahead) }), nil
 			}
-			return body, nil
+			return Action{}, nil
 		})
 	}()
 	<-errc
@@ -379,10 +391,26 @@ func (s *Server) handle(ctx context.Context, raw net.Conn) {
 	}
 }
 
+// guard runs a watcher call. A watcher that panics is a bug in LQO, never a
+// reason to break the application's connection: the session carries on
+// without it, passing everything through.
+func (s *Server) guard(broken *atomic.Bool, f func() Action) (a Action) {
+	defer func() {
+		if r := recover(); r != nil {
+			broken.Store(true)
+			s.logf("watcher failed, this connection carries on without it: %v", r)
+			a = Action{}
+		}
+	}()
+	return f()
+}
+
 // relay copies whole messages from src to dst until either side fails.
-// hook sees each one and may replace its body. dst is flushed whenever src
-// has nothing more buffered, so pipelined messages go out together.
-func relay(dst *bufio.Writer, src *bufio.Reader, hook func(byte, []byte) ([]byte, error)) error {
+// hook sees each one, with the bytes already buffered after it, and may
+// replace its body, put messages before it or drop it. dst is flushed
+// whenever src has nothing more buffered, so pipelined messages go out
+// together.
+func relay(dst *bufio.Writer, src *bufio.Reader, hook func(byte, []byte, []byte) (Action, error)) error {
 	var hdr [5]byte
 	buf := make([]byte, 8192)
 	for {
@@ -407,19 +435,29 @@ func relay(dst *bufio.Writer, src *bufio.Reader, hook func(byte, []byte) ([]byte
 		if _, err := io.ReadFull(src, body); err != nil {
 			return err
 		}
-		out, err := hook(hdr[0], body)
+		ahead, _ := src.Peek(src.Buffered())
+		act, err := hook(hdr[0], body, ahead)
 		if err != nil {
 			dst.Flush()
 			return err
 		}
-		if len(out) != n {
-			binary.BigEndian.PutUint32(hdr[1:], uint32(len(out)+4))
+		if len(act.Before) > 0 {
+			if _, err := dst.Write(act.Before); err != nil {
+				return err
+			}
 		}
-		if _, err := dst.Write(hdr[:]); err != nil {
-			return err
-		}
-		if _, err := dst.Write(out); err != nil {
-			return err
+		if !act.Drop {
+			out := body
+			if act.Body != nil {
+				out = act.Body
+				binary.BigEndian.PutUint32(hdr[1:], uint32(len(out)+4))
+			}
+			if _, err := dst.Write(hdr[:]); err != nil {
+				return err
+			}
+			if _, err := dst.Write(out); err != nil {
+				return err
+			}
 		}
 		if src.Buffered() == 0 {
 			if err := dst.Flush(); err != nil {

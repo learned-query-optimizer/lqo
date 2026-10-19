@@ -10,7 +10,8 @@
 // the planner has no statistics for values inside JSON, so it guesses that
 // any one value matches 0.5% of rows. Two such conditions together it
 // guesses at 0.0025%, when in this data they match half the customers. A
-// plan built for a handful of customers then runs for a hundred thousand.
+// plan built for a handful of customers then runs for a hundred thousand,
+// looking up each order line's product one at a time.
 package demo
 
 import (
@@ -24,11 +25,12 @@ import (
 // Schema is the schema the demo creates and replaces.
 const Schema = "lqo_demo"
 
-// Sizes are the row counts at scale 1.
+// Sizes are the row counts at scale 1. Products don't scale.
 const (
 	Customers  = 200000
 	Orders     = 1000000
 	OrderLines = 3000000
+	Products   = 1000
 )
 
 // SetupSQL returns the statements that build the demo at the given scale.
@@ -56,17 +58,22 @@ FROM generate_series(1, %[3]d) g`, Schema, c-30, c),
 SELECT g AS id, ((g::bigint * 7) %% %d)::int + 1 AS customer_id, (g * 13) %% 500 AS total
 FROM generate_series(1, %d) g`, Schema, c, o),
 		fmt.Sprintf(`CREATE TABLE %s.order_lines AS
-SELECT g AS id, ((g::bigint * 11) %% %d)::int + 1 AS order_id, g %% 1000 AS product_id, (g %% 7) + 1 AS qty
-FROM generate_series(1, %d) g`, Schema, o, l),
+SELECT g AS id, ((g::bigint * 11) %% %d)::int + 1 AS order_id, g %% %d AS product_id, (g %% 7) + 1 AS qty
+FROM generate_series(1, %d) g`, Schema, o, Products, l),
+		fmt.Sprintf(`CREATE TABLE %s.products AS
+SELECT g AS id, (g %% 50) + 1 AS price
+FROM generate_series(0, %d) g`, Schema, Products-1),
 		"ALTER TABLE " + Schema + ".customers ADD PRIMARY KEY (id)",
 		"CREATE INDEX ON " + Schema + ".customers (created_at)",
 		"ALTER TABLE " + Schema + ".orders ADD PRIMARY KEY (id)",
 		"CREATE INDEX ON " + Schema + ".orders (customer_id)",
 		"ALTER TABLE " + Schema + ".order_lines ADD PRIMARY KEY (id)",
 		"CREATE INDEX ON " + Schema + ".order_lines (order_id)",
+		"ALTER TABLE " + Schema + ".products ADD PRIMARY KEY (id)",
 		"VACUUM ANALYZE " + Schema + ".customers",
 		"VACUUM ANALYZE " + Schema + ".orders",
 		"VACUUM ANALYZE " + Schema + ".order_lines",
+		"VACUUM ANALYZE " + Schema + ".products",
 	}
 }
 
@@ -76,17 +83,20 @@ const Workload = `-- LQO demo workload, for the lqo_demo schema that "lqo demo" 
 
 -- 1. A trap. Two JSON conditions the planner guesses match 0.0025% of
 --    customers actually match half of them, so its nested loops run
---    hundreds of thousands of times. A hash join is faster on both texts.
-SELECT sum(l.qty)
+--    hundreds of thousands of times, down to each line's product. Hash
+--    joins are faster on both texts.
+SELECT sum(l.qty * p.price)
   FROM lqo_demo.customers c
   JOIN lqo_demo.orders o ON o.customer_id = c.id
   JOIN lqo_demo.order_lines l ON l.order_id = o.id
+  JOIN lqo_demo.products p ON p.id = l.product_id
  WHERE c.attrs->>'tier' = 'gold' AND c.attrs->>'channel' = 'partner';
 
-SELECT sum(l.qty)
+SELECT sum(l.qty * p.price)
   FROM lqo_demo.customers c
   JOIN lqo_demo.orders o ON o.customer_id = c.id
   JOIN lqo_demo.order_lines l ON l.order_id = o.id
+  JOIN lqo_demo.products p ON p.id = l.product_id
  WHERE c.attrs->>'tier' = 'basic' AND c.attrs->>'channel' = 'web';
 
 -- 2. A trap the other way. The planner expects 0.5% of customers to be

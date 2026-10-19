@@ -36,6 +36,7 @@ const usage = `lqo finds the PostgreSQL queries a planner setting makes clearly 
 Usage:
   lqo advise [flags] WORKLOAD...   try a workload's queries with each hint and report
   lqo serve [flags]                run as a proxy, measure live queries, learn on a replica
+  lqo switch off|on [SHAPE]        turn a running lqo serve's hints off or on
   lqo show [flags]                 print what the state file holds
   lqo report [flags] REPORT.json   print a saved JSON report as text or Markdown
   lqo hints [--hints full]         list the hints lqo tries
@@ -74,6 +75,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		err = cmdAdvise(ctx, args[1:], stdout, stderr)
 	case "serve":
 		err = cmdServe(ctx, args[1:], stdout, stderr)
+	case "switch":
+		err = cmdSwitch(args[1:], stdout, stderr)
 	case "show":
 		err = cmdShow(args[1:], stdout, stderr)
 	case "report":

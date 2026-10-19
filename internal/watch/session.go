@@ -5,6 +5,8 @@ package watch
 
 import (
 	"encoding/binary"
+	"math/rand/v2"
+	"strconv"
 	"sync"
 	"time"
 
@@ -21,6 +23,7 @@ const maxStatements = 5000
 type statement struct {
 	text string
 	oids []uint32 // from Parse, then filled in from ParameterDescription
+	key  string   // database and shape ID, worked out when first needed
 }
 
 type pendingKind uint8
@@ -29,6 +32,7 @@ const (
 	pendSimple pendingKind = iota
 	pendExec
 	pendSync
+	pendInject // the replies to messages LQO put in, to take out again
 )
 
 type pending struct {
@@ -38,10 +42,25 @@ type pending struct {
 	params []string // literals; nil when the statement has none
 	noText bool     // a value couldn't be written as SQL
 	err    bool
+
+	hinted    bool // LQO applied a hint to this one
+	holdout   bool // a hint applied to its shape, but not to this call
+	prefixLen int  // characters LQO put in front of a simple query
+
+	// For pendInject: replies to pass on first (the client's own, sent
+	// before LQO's messages), then the replies to LQO's messages, to drop.
+	pass, expect []byte
 }
 
 // session follows one client connection's requests and replies. The proxy
 // calls FromClient and FromServer from two goroutines.
+//
+// In active mode it also applies proven hints. A hint is applied only to a
+// statement that starts a fresh implicit transaction: the session is idle,
+// nothing else is in flight, and the statement is the whole of what the
+// client sent before its Sync. Its settings are set with set_config(...,
+// true), which is SET LOCAL: they end with that implicit transaction, so
+// they can't reach any other statement.
 type session struct {
 	c        *Collector
 	db, user string
@@ -52,34 +71,41 @@ type session struct {
 	queue     []*pending
 	describes []string // statement names awaiting ParameterDescription
 	lastDone  time.Time
-	lost      bool // stopped tracking: too much pipelined
+	lost      bool   // stopped tracking: too much pipelined
+	txStatus  byte   // from the last ReadyForQuery
+	batch     []byte // the client's messages since the last reply was complete
+	injected  map[string]string
+	rng       *rand.Rand
 }
 
 var _ proxy.Session = (*session)(nil)
 
-func (s *session) FromClient(typ byte, body []byte) {
+func (s *session) FromClient(typ byte, body, ahead []byte) proxy.Action {
 	switch typ {
-	case 'Q', 'P', 'B', 'E', 'S', 'D', 'C':
+	case 'Q', 'P', 'B', 'E', 'S', 'D', 'C', 'F', 'H':
 	default:
-		return // COPY data and the like
+		return proxy.Action{} // COPY data and the like
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
+	var act proxy.Action
 	switch typ {
 	case 'Q':
 		text, _, ok := cstring(body)
 		if ok {
-			s.push(&pending{kind: pendSimple, sent: now, stmt: &statement{text: text}})
+			p := &pending{kind: pendSimple, sent: now, stmt: &statement{text: text}}
+			act = s.hintSimple(p)
+			s.push(p)
 		}
 	case 'P':
 		name, rest, ok := cstring(body)
 		if !ok {
-			return
+			break
 		}
 		text, rest, ok := cstring(rest)
 		if !ok {
-			return
+			break
 		}
 		st := &statement{text: text}
 		if len(rest) >= 2 {
@@ -97,11 +123,11 @@ func (s *session) FromClient(typ byte, body []byte) {
 	case 'B':
 		m, err := parseBind(body)
 		if err != nil {
-			return
+			break
 		}
 		st := s.stmts[m.stmt]
 		if st == nil {
-			return
+			break
 		}
 		p := &pending{kind: pendExec, stmt: st}
 		if len(m.values) > 0 {
@@ -120,6 +146,7 @@ func (s *session) FromClient(typ byte, body []byte) {
 				p.params[i] = lit
 			}
 		}
+		act = s.hintExtended(p, ahead)
 		if len(s.portals) >= maxStatements {
 			s.portals = map[string]*pending{}
 		}
@@ -127,10 +154,13 @@ func (s *session) FromClient(typ byte, body []byte) {
 	case 'E':
 		portal, _, ok := cstring(body)
 		if !ok {
-			return
+			break
 		}
 		if p := s.portals[portal]; p != nil {
-			s.push(&pending{kind: pendExec, sent: now, stmt: p.stmt, params: p.params, noText: p.noText})
+			s.push(&pending{kind: pendExec, sent: now, stmt: p.stmt, params: p.params, noText: p.noText, hinted: p.hinted, holdout: p.holdout})
+			// A portal is hinted once: run again after its Sync, its
+			// transaction and settings are gone.
+			p.hinted, p.holdout = false, false
 		}
 	case 'S':
 		s.push(&pending{kind: pendSync, sent: now})
@@ -153,6 +183,143 @@ func (s *session) FromClient(typ byte, body []byte) {
 			}
 		}
 	}
+	if len(s.batch) < 64 {
+		s.batch = append(s.batch, typ)
+	}
+	return act
+}
+
+// fresh reports whether a statement would start a new implicit
+// transaction of its own: the session is idle, everything sent before has
+// been answered, and the client has sent nothing since but what's in
+// allowed.
+func (s *session) fresh(allowed string) bool {
+	if s.txStatus != 'I' || len(s.queue) > 0 || s.lost || len(s.batch) > len(allowed) {
+		return false
+	}
+	return string(s.batch) == allowed[:len(s.batch)] && len(s.batch) == len(allowed)
+}
+
+// hintFor finds the active hint for a statement's shape, and decides
+// whether this call is held out to compare against.
+func (s *session) hintFor(st *statement, p *pending) *Hint {
+	set := s.c.active.Load()
+	if set == nil || set.Off || len(set.Hints) == 0 {
+		return nil
+	}
+	if st.key == "" {
+		st.key = s.db + "/" + s.c.fingerprint(st.text)
+	}
+	h := set.Hints[st.key]
+	if h == nil {
+		return nil
+	}
+	if s.rng == nil {
+		s.rng = rand.New(rand.NewPCG(uint64(time.Now().UnixNano()), uint64(len(s.db))))
+	}
+	if set.Holdout > 0 && s.rng.Float64() < set.Holdout {
+		p.holdout = true
+		return nil
+	}
+	return h
+}
+
+// hintSimple puts the hint's settings in front of a simple query, in the
+// same Query message, so they share its implicit transaction.
+func (s *session) hintSimple(p *pending) proxy.Action {
+	if !s.fresh("") {
+		return proxy.Action{}
+	}
+	h := s.hintFor(p.stmt, p)
+	if h == nil {
+		return proxy.Action{}
+	}
+	prefix := h.SQL + "; "
+	body := make([]byte, 0, len(prefix)+len(p.stmt.text)+1)
+	body = append(body, prefix...)
+	body = append(body, p.stmt.text...)
+	body = append(body, 0)
+	p.hinted = true
+	p.prefixLen = len(prefix)
+	s.push(&pending{kind: pendInject, expect: []byte("TDC")})
+	return proxy.Action{Body: body}
+}
+
+// hintExtended runs the hint's settings, as a statement of LQO's own,
+// between the client's Parse and its Bind, where the plan is made. Only
+// when the client's batch is Parse (optional), Bind, Describe (optional),
+// Execute, Sync, all already sent, so nothing else shares the
+// transaction.
+func (s *session) hintExtended(p *pending, ahead []byte) proxy.Action {
+	parsed := s.fresh("P")
+	if !parsed && !s.fresh("") {
+		return proxy.Action{}
+	}
+	if !wholeBatch(ahead) {
+		return proxy.Action{}
+	}
+	h := s.hintFor(p.stmt, p)
+	if h == nil {
+		return proxy.Action{}
+	}
+	if s.injected == nil {
+		s.injected = map[string]string{}
+	}
+	var before []byte
+	expect := []byte("2DC")
+	name, ok := s.injected[h.SQL]
+	if !ok {
+		name = "lqo_hint_" + strconv.Itoa(len(s.injected)+1)
+		s.injected[h.SQL] = name
+		before = appendMsg(before, 'P', cstr(name), cstr(h.SQL), []byte{0, 0})
+		expect = []byte("12DC")
+	}
+	before = appendMsg(before, 'B', cstr("lqo_hint"), cstr(name), []byte{0, 0, 0, 0, 0, 0})
+	before = appendMsg(before, 'E', cstr("lqo_hint"), []byte{0, 0, 0, 0})
+	inj := &pending{kind: pendInject, expect: expect}
+	if parsed {
+		inj.pass = []byte("1") // the client's own ParseComplete comes first
+	}
+	s.push(inj)
+	p.hinted = true
+	return proxy.Action{Before: before}
+}
+
+// wholeBatch reports whether ahead starts with an optional Describe, an
+// Execute and a Sync: the rest of a single statement's batch.
+func wholeBatch(ahead []byte) bool {
+	var types []byte
+	for len(ahead) >= 5 && len(types) < 3 {
+		n := int(binary.BigEndian.Uint32(ahead[1:]))
+		if n < 4 || len(ahead) < 1+n {
+			return false
+		}
+		types = append(types, ahead[0])
+		ahead = ahead[1+n:]
+		if ahead := types[len(types)-1]; ahead == 'S' {
+			break
+		}
+	}
+	switch string(types) {
+	case "ES", "DES":
+		return true
+	}
+	return false
+}
+
+func cstr(s string) []byte { return append([]byte(s), 0) }
+
+func appendMsg(b []byte, typ byte, parts ...[]byte) []byte {
+	n := 4
+	for _, p := range parts {
+		n += len(p)
+	}
+	b = append(b, typ)
+	b = binary.BigEndian.AppendUint32(b, uint32(n))
+	for _, p := range parts {
+		b = append(b, p...)
+	}
+	return b
 }
 
 func (s *session) push(p *pending) {
@@ -174,24 +341,48 @@ func (s *session) push(p *pending) {
 	s.queue = append(s.queue, p)
 }
 
-func (s *session) FromServer(typ byte, body []byte) {
+func (s *session) FromServer(typ byte, body []byte) proxy.Action {
 	switch typ {
-	case 't', 'C', 'I', 's', 'E', 'Z':
+	case 't', 'C', 'I', 's', 'E', 'Z', 'T', 'D', '1', '2', 'N':
 	default:
-		return // rows and the like: nothing to note, and many of them
+		return proxy.Action{} // nothing to note
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Replies to messages LQO put in are taken out, in order.
+	if f := s.front(); f != nil && f.kind == pendInject {
+		switch {
+		case typ == 'N':
+			// A notice: pass it on.
+		case len(f.pass) > 0 && typ == f.pass[0]:
+			f.pass = f.pass[1:]
+			return proxy.Action{}
+		case len(f.pass) == 0 && len(f.expect) > 0 && typ == f.expect[0]:
+			f.expect = f.expect[1:]
+			if len(f.expect) == 0 {
+				s.queue = s.queue[1:]
+			}
+			return proxy.Action{Drop: true}
+		default:
+			// Something else, such as an error: the server will skip
+			// LQO's messages along with the client's. Stop expecting.
+			s.queue = s.queue[1:]
+		}
+	}
 	switch typ {
+	case 'T', 'D', '1', '2':
+		return proxy.Action{}
+	case 'N':
+		return s.fixPosition(body)
 	case 't':
 		if len(s.describes) == 0 {
-			return
+			return proxy.Action{}
 		}
 		name := s.describes[0]
 		s.describes = s.describes[1:]
 		st := s.stmts[name]
 		if st == nil || len(body) < 2 {
-			return
+			return proxy.Action{}
 		}
 		n := int(binary.BigEndian.Uint16(body))
 		b := body[2:]
@@ -212,32 +403,76 @@ func (s *session) FromServer(typ byte, body []byte) {
 			s.done(f)
 		}
 	case 'E':
+		act := s.fixPosition(body)
 		f := s.front()
 		if f == nil {
-			return
+			return act
 		}
 		f.err = true
 		if f.kind == pendExec {
 			s.done(f)
 			// The server skips everything up to the next Sync.
-			for len(s.queue) > 0 && s.queue[0].kind == pendExec {
+			for len(s.queue) > 0 && (s.queue[0].kind == pendExec || s.queue[0].kind == pendInject) {
 				s.queue = s.queue[1:]
 			}
 		}
+		return act
 	case 'Z':
+		if len(body) > 0 {
+			s.txStatus = body[0]
+		}
 		for len(s.queue) > 0 {
 			f := s.queue[0]
 			if f.kind == pendSimple {
 				s.done(f)
-				return
+				break
 			}
 			s.queue = s.queue[1:]
 			if f.kind == pendSync {
 				s.lastDone = time.Now()
-				return
+				break
 			}
 		}
+		if len(s.queue) == 0 {
+			s.batch = s.batch[:0]
+		}
 	}
+	return proxy.Action{}
+}
+
+// fixPosition corrects the error position in an error or notice about a
+// simple query LQO put a hint in front of, so the client points at the
+// right character of its own text.
+func (s *session) fixPosition(body []byte) proxy.Action {
+	f := s.front()
+	if f == nil || f.kind != pendSimple || f.prefixLen == 0 {
+		return proxy.Action{}
+	}
+	out := make([]byte, 0, len(body))
+	changed := false
+	b := body
+	for len(b) > 0 && b[0] != 0 {
+		code := b[0]
+		val, rest, ok := cstring(b[1:])
+		if !ok {
+			return proxy.Action{}
+		}
+		if code == 'P' {
+			if n, err := strconv.Atoi(val); err == nil && n > f.prefixLen {
+				val = strconv.Itoa(n - f.prefixLen)
+				changed = true
+			}
+		}
+		out = append(out, code)
+		out = append(out, val...)
+		out = append(out, 0)
+		b = rest
+	}
+	out = append(out, 0)
+	if !changed {
+		return proxy.Action{}
+	}
+	return proxy.Action{Body: out}
 }
 
 func (s *session) front() *pending {
@@ -259,14 +494,16 @@ func (s *session) done(f *pending) {
 	}
 	s.lastDone = now
 	s.c.record(event{
-		db:     s.db,
-		user:   s.user,
-		text:   f.stmt.text,
-		params: f.params,
-		noText: f.noText,
-		ms:     float64(now.Sub(start).Microseconds()) / 1000,
-		err:    f.err,
-		at:     now,
+		db:      s.db,
+		user:    s.user,
+		text:    f.stmt.text,
+		params:  f.params,
+		noText:  f.noText,
+		ms:      float64(now.Sub(start).Microseconds()) / 1000,
+		err:     f.err,
+		at:      now,
+		hinted:  f.hinted,
+		holdout: f.holdout,
 	})
 }
 

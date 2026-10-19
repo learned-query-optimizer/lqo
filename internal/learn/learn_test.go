@@ -286,7 +286,7 @@ func TestLearnsTheDemoTrapThroughTheProxy(t *testing.T) {
 	}
 	defer app.Close()
 	trap := func(tier, channel string) string {
-		return "SELECT sum(l.qty) FROM " + schema + ".customers c JOIN " + schema + ".orders o ON o.customer_id = c.id JOIN " + schema + ".order_lines l ON l.order_id = o.id WHERE c.attrs->>'tier' = '" + tier + "' AND c.attrs->>'channel' = '" + channel + "'"
+		return "SELECT sum(l.qty * p.price) FROM " + schema + ".customers c JOIN " + schema + ".orders o ON o.customer_id = c.id JOIN " + schema + ".order_lines l ON l.order_id = o.id JOIN " + schema + ".products p ON p.id = l.product_id WHERE c.attrs->>'tier' = '" + tier + "' AND c.attrs->>'channel' = '" + channel + "'"
 	}
 	key := "SELECT count(*) FROM " + schema + ".customers c JOIN " + schema + ".orders o ON o.customer_id = c.id WHERE c.id = "
 	for i := 0; i < 3; i++ {
@@ -309,7 +309,7 @@ func TestLearnsTheDemoTrapThroughTheProxy(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, s := range l.Shapes() {
-			if strings.Contains(s.Normalized, "sum ( l . qty )") {
+			if strings.Contains(s.Normalized, "sum ( l . qty * p . price )") {
 				s := s
 				trapShape = &s
 			}

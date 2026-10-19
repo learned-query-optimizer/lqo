@@ -16,10 +16,11 @@ planner switches (`enable_nestloop`, `enable_hashjoin` and the rest), so every
 plan it suggests is one PostgreSQL already knows how to run.
 
 LQO works two ways. `lqo advise` reads a SQL file or a server log and tests
-what's in it. `lqo serve`, new in 0.2, sits between your application and the
-database as a proxy, measures every query as it runs, and learns on a replica
-which settings help which queries. Neither changes anything on the server: they
-report, and you decide.
+what's in it. `lqo serve` sits between your application and the database as a
+proxy, measures every query as it runs, and learns on a replica which settings
+help which queries. By default both only report, and you decide. With
+`--mode active`, new in 0.3, `lqo serve` also applies the settings it has proven
+to the live queries, and takes one back if it runs slower live.
 
 - Website: https://lqo.net
 - License: Apache 2.0
@@ -36,7 +37,7 @@ report, and you decide.
 6. [Learn from live traffic: lqo serve](#learn-from-live-traffic-lqo-serve)
 7. [What LQO will and won't run](#what-lqo-will-and-wont-run)
 8. [Commands](#commands)
-9. [What 0.2 doesn't do](#what-02-doesnt-do)
+9. [What 0.3 doesn't do](#what-03-doesnt-do)
 10. [Building and testing](#building-and-testing)
 
 ## Install
@@ -87,13 +88,13 @@ a report like this one, from the recorded run in
 ```
 Faster with a hint: 2 of 5 tested
 
-  1. 891f0819  SELECT sum(l.qty) FROM lqo_demo.customers c JOIN lqo_demo.order…  (2 calls)
-     1,308 ms → 960 ms (−27%) with "no nested loop"
-     Plan: Nested Loop ×2, Bitmap Heap Scan on orders, Index Scan on order_lines → Hash Join ×2, Seq Scan on order_lines, Seq Scan on orders
+  1. ef02bfce  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_…  (2 calls)
+     2,297 ms → 1,078 ms (−53%) with "no nested loop"
+     Plan: Nested Loop ×3, Bitmap Heap Scan on orders, Index Scan on order_lines, Index Scan on products → Hash Join ×3, Seq Scan on order_lines, Seq Scan on orders, Seq Scan on products
        SET LOCAL enable_nestloop = off;
 
   2. 6c73a7a6  SELECT id, created_at FROM lqo_demo.customers WHERE attrs->>'ti…  (1 call)
-     45.9 ms → 29.0 ms (−37%) with "no index scan"
+     48.4 ms → 30.9 ms (−36%) with "no index scan"
      Plan: Index Scan on customers → Seq Scan on customers
        SET LOCAL enable_indexscan = off;
        SET LOCAL enable_indexonlyscan = off;
@@ -204,7 +205,7 @@ transaction that runs the query:
 ```sql
 BEGIN;
 SET LOCAL enable_nestloop = off;
-SELECT sum(l.qty) FROM ... ;
+SELECT sum(l.qty * p.price) FROM ... ;
 COMMIT;
 ```
 
@@ -296,18 +297,20 @@ only needs the server's address and TLS settings; `--replica` needs a login, lik
 The status page, on `http://127.0.0.1:6434/` by default, shows what it has seen and
 learned, and `/status` has the same as JSON. `lqo show` reads it from the state
 file afterwards. This is the recorded run on the demo, from
-[test/results/serve/demo.txt](test/results/serve/demo.txt), five minutes in:
+[test/results/serve/demo.txt](test/results/serve/demo.txt), seven minutes in, when the first hint was proven:
 
 ```
-lqo 0.2.0, shadow mode, up 5m26s
-connections: 0 open, 15 in all
-statements measured: 45 in 2 shapes
-learning: 4 rounds, 16 hint trials, replica busy 1m32s, 1 proven
+lqo 0.3.0, active mode, up 7m2s
+connections: 0 open, 11 in all
+statements measured: 33 in 2 shapes
+learning: 3 rounds, 12 hint trials, replica busy 2m7s, 1 proven
+applying: 1 hints
 
-891f0819  lqo_test  SELECT sum(l.qty) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON…
-  30 calls, 44,276 ms in all, median 1,202 ms, p95 2,859 ms
-  proven: "no nested loop", about 22% faster on the replica
+ef02bfce  lqo_test  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
+  22 calls, 65,283 ms in all, median 2,404 ms, p95 4,808 ms
+  proven: "no nested loop", about 48% faster on the replica
     SET LOCAL enable_nestloop = off;
+  applied: 0 calls, median 0.00 ms; 2,374 ms before
 ```
 
 **How it learns.** Trying all 13 hints on every text would keep the replica busy
@@ -326,15 +329,16 @@ check loses its standing.
 **What it costs.** The learner keeps the replica busy at most a quarter of the time
 (`--budget`). The proxy adds time to every query, mostly the extra hop. On the
 two-core test machine, shared by pgbench, PostgreSQL and LQO, a one-row indexed
-SELECT took 0.16 ms straight and 0.48 ms through LQO with prepared statements, and
-0.26 ms against 0.70 ms with plain queries
+SELECT took 0.18 ms straight and 0.47 ms through LQO with prepared statements, and
+0.27 ms against 0.68 ms with plain queries
 ([test/results/serve/overhead.txt](test/results/serve/overhead.txt)). With LQO on
 its own cores, or next to the application, the cost is lower; measure it on yours
 before you rely on it. Measuring never holds traffic up: if LQO falls behind, it drops
 measurements, never queries.
 
-**What it changes: nothing.** 0.2 runs in shadow mode only. Applying proven hints
-to live queries is planned for 0.3.
+**What it changes.** In shadow mode, the default, nothing. With `--mode active`,
+LQO applies each proven hint to the live calls of its shape; see
+[Active mode](#active-mode) below.
 
 **Connecting.** Plain and prepared queries, pipelining, `COPY`, cancel requests
 and notifications pass through. With `--tls-cert` and
@@ -348,6 +352,62 @@ localhost, and keeps TLS between LQO and the database.
 If the replica goes away, learning pauses and traffic carries on. LQO saves what it
 has learned to the state file as it goes; after a crash or a restart it picks up
 where it was.
+
+### Active mode
+
+```sh
+lqo serve --mode active --dsn "postgres://db1:5432/shop?sslmode=require" \
+          --replica "postgres://lqo@replica1:5432/shop?sslmode=require"
+```
+
+In active mode, LQO applies each proven hint to the live calls of its shape. It
+does it the way you would by hand: the hint's settings go in with `SET LOCAL`, so
+they last for that one statement's transaction and end with it.
+
+- **Only where nothing else can feel it.** A hint is applied only when the session
+  is idle and the statement is all the client sent before its Sync: a statement
+  that starts and ends its own transaction. Inside the application's own
+  transaction, or in a pipeline of several statements, LQO passes it through as
+  it came.
+- **How.** For a simple query, LQO puts
+  `SELECT set_config('enable_nestloop', 'off', true), ...; ` in front of it, in the
+  same message, and takes that SELECT's reply out before it reaches the client.
+  For a prepared statement it runs the same SELECT, as a statement of its own,
+  between the client's Parse and Bind, where PostgreSQL makes the plan. Either
+  way the client sees exactly the replies it would without LQO. Error positions
+  are corrected to point into the client's own text. The hint also sets
+  `plan_cache_mode = force_custom_plan` for that transaction, so a prepared
+  statement's cached plan isn't reused without the hint, and no plan made with it
+  is cached.
+- **Checked live.** 10% of a hinted shape's calls run without the hint
+  (`--holdout`). Once a hint has run 20 times, the guard compares its median with
+  the held-out calls' (or, until there are 5 of those, with the shape's median
+  before the hint). A hint more than 10% slower is taken back at once, ruled out
+  for that shape, and the shape goes back to learning.
+- **Switches.** `lqo switch off` stops every hint, `lqo switch off ef02bfce`
+  stops one shape's, and `on` brings them back. They act on the next query and
+  are saved in the state file, so they hold across restarts.
+- **Fail-safe.** When the replica can't be reached, or the state file can't be
+  written, LQO applies nothing until they're back. If anything inside LQO's own
+  handling of a session fails, that session carries on as plain passthrough.
+
+The status page shows, per shape, the calls with the hint and without, and their
+medians. In the recorded run on the demo
+([test/results/serve/demo.txt](test/results/serve/demo.txt)), three minutes after
+the hint was proven, with a quarter of the calls held out (`--holdout 25`):
+
+```
+ef02bfce  lqo_test  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
+  68 calls, 134,331 ms in all, median 1,700 ms, p95 4,043 ms
+  proven: "no nested loop", about 49% faster on the replica
+    SET LOCAL enable_nestloop = off;
+  applied: 35 calls, median 1,077 ms; 11 held out, median 2,174 ms; 2,374 ms before
+```
+
+Applying a hint costs one more statement in the same round trip. With every one of
+pgbench's SELECTs hinted, the one-row SELECT took 0.66 ms through LQO with prepared
+statements and 0.86 ms with plain queries, against 0.47 ms and 0.68 ms unhinted
+([test/results/serve/overhead.txt](test/results/serve/overhead.txt)).
 
 ## What LQO will and won't run
 
@@ -387,6 +447,7 @@ application's locks.
 ```
 lqo advise [flags] WORKLOAD...   try a workload's queries with each hint and report
 lqo serve [flags]                run as a proxy, measure live queries, learn on a replica
+lqo switch off|on [SHAPE]        turn a running lqo serve's hints off or on
 lqo show [flags]                 print what the state file holds
 lqo report [flags] REPORT.json   print a saved JSON report as text or Markdown
 lqo hints [--hints full]         list the hints lqo tries
@@ -422,6 +483,8 @@ lqo version                      print the version
 |---|---|---|
 | `--dsn` | `LQO_DSN`, then `PG*` | the database server: address and TLS settings |
 | `--replica` | none | a replica to learn on, with a login; without it LQO only measures |
+| `--mode` | `shadow` | `shadow` (learn and report) or `active` (also apply proven hints); active needs `--replica` |
+| `--holdout` | 10 | in active mode, percent of a hinted shape's calls run without the hint |
 | `--allow-primary` | off | let `--replica` be a primary |
 | `--listen` | `127.0.0.1` | address to listen on, or a directory for a Unix socket |
 | `--port` | 6433 | port to listen on |
@@ -445,11 +508,11 @@ refusal, such as a primary without `--allow-primary`.
 [docs/REFERENCE.md](docs/REFERENCE.md) has the details: workload formats, the
 JSON report, the state file and the connection settings.
 
-## What 0.2 doesn't do
+## What 0.3 doesn't do
 
-- **It doesn't change anything.** You apply the suggestions. `lqo serve` applying
-  proven hints to live queries, and backing them out when they stop winning, is
-  planned for 0.3.
+- **It changes nothing unless you ask.** `lqo advise` and `lqo serve` in shadow
+  mode only report. Only `lqo serve --mode active` applies hints, and only ones
+  proven on the replica.
 - **It doesn't learn across shapes yet.** Each shape is tested on its own. A new
   shape needs its own run.
 - **Only planner switches.** No join-order hints beyond "as written", and no
@@ -485,7 +548,13 @@ and TLS on both sides; psql and pgbench, pipelining included, work through it;
 the learner finds the demo trap from traffic sent through the proxy; losing the
 replica pauses learning while queries carry on; and `lqo serve` killed with
 SIGKILL 10 times while saving leaves its state file whole and keeps what it
-learned.
+learned. For active mode: a hint is applied to plain and prepared queries and the
+very next statement in the session sees nothing of it; nothing is applied inside
+the application's own transaction or in a pipeline; answers are the same with
+hints applied; error positions still point into the application's text; the
+switches act on the next query; nothing is applied while the replica or the state
+file is unavailable; the guard takes back a hint that runs slower live; and
+pgbench runs through an active proxy in every protocol, pipelines included.
 
 `sh scripts/record-tests.sh` runs them all and writes the output to
 [test/results/](test/results/). The Join Order Benchmark, 113 queries in 94 shapes

@@ -27,6 +27,16 @@ unchanged, measures every statement per shape (`internal/watch`), and with
 ended at the proxy (it must see the queries), so SCRAM channel binding can't pass
 through; the proxy strips -PLUS and explains `channel_binding=disable`.
 
+v0.3.0 adds active mode (October 2026): `lqo serve --mode active` applies proven
+hints to live queries with `set_config(..., true)` (SET LOCAL) plus
+`plan_cache_mode = force_custom_plan`, only to a statement that is its own implicit
+transaction (session idle, nothing in flight, the whole batch before Sync), and
+takes LQO's own replies out of the stream (`internal/watch/session.go`). A guard
+compares hinted calls with held-out ones (`--holdout`, 10%) and takes a hint back
+when it runs over 10% slower live; `lqo switch` and the status page's POST routes
+turn hints off and on; nothing is applied while the replica or the state file is
+unavailable. Shadow mode stays the default.
+
 The code is Go with no dependencies: `internal/pgwire` is LQO's own small
 PostgreSQL client (simple query protocol, trust/md5/SCRAM, TLS), because pgx and
 golang.org/x modules can't be fetched from a cloud session. Keep it
@@ -66,16 +76,9 @@ optimizer is, how LQO was tested, the name, and the Join Order Benchmark results
 
 ## Next
 
-Agreed with the owner in October 2026, in this order. Each starts only when the
-owner says go:
+Agreed with the owner in October 2026: v0.2.0 (shadow mode) and v0.3.0 (active
+mode) are both done. Nothing further is agreed; what comes next is decided with
+the owner before it goes here.
 
-1. **v0.2.0, the proxy in shadow mode (`lqo serve`).** Done, October 2026.
-2. **v0.3.0, active mode.** Proven hints applied to live queries with SET LOCAL; a
-   regression guard per shape that reverts a hint whose live latency slips past
-   the baseline; per-shape and global kill switches; fail-safe passthrough when
-   the replica or the state file is unavailable.
-
-Tests for both: results identical with LQO in the path, SIGKILL and restart with
-the state intact, replica loss, SET LOCAL never leaking, timeouts, pgbench
-overhead. Later ideas (sharing what's learned across similar shapes, pg_hint_plan
-join-order hints) are decided with the owner before they go here.
+Ideas mentioned but not agreed: sharing what's learned across similar shapes,
+pg_hint_plan join-order hints.

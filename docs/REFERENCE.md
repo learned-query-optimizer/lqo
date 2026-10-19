@@ -180,7 +180,7 @@ Times are in milliseconds.
     "891f0819ce6bf4ec": {
       "id": "891f0819ce6bf4ec",
       "normalized": "select sum ( l . qty ) from ...",
-      "example": "SELECT sum(l.qty) FROM ...",
+      "example": "SELECT sum(l.qty * p.price) FROM ...",
       "database": "shop",
       "server_version_num": 160015,
       "tested": "2026-10-18T21:30:00Z",
@@ -296,17 +296,62 @@ After each round the learner waits so the replica is busy at most `--budget` of
 the time. If the replica can't be reached, learning pauses, retries after 1
 second, then 2, up to a minute, and traffic is untouched.
 
+### Active mode
+
+With `--mode active`, each shape whose status is `proven`, and that isn't
+switched off, has its hint applied to live calls. A call gets it only when all
+of these hold:
+
+- the session's last ReadyForQuery said idle (`I`), and every earlier request has
+  been answered;
+- for a simple query: the Query is the only message since;
+- for the extended protocol: the client's messages since are an optional Parse
+  and this Bind, and what it has already sent after the Bind is an optional
+  Describe, an Execute and a Sync;
+- the call isn't one of the `--holdout` share chosen at random to run without it.
+
+The settings go in with `SELECT set_config(name, value, true), ...,
+set_config('plan_cache_mode', 'force_custom_plan', true)`, which is `SET LOCAL`:
+
+| Protocol | What LQO sends | What it takes out of the replies |
+|---|---|---|
+| simple | the SELECT and `; ` in front of the client's text, in the same Query, so both run in one implicit transaction | the SELECT's RowDescription, DataRow and CommandComplete |
+| extended | Parse (once per session, as `lqo_hint_N`), Bind to portal `lqo_hint` and Execute of the SELECT, after the client's Parse and before its Bind | the matching ParseComplete, BindComplete, DataRow and CommandComplete |
+
+An error or notice about a hinted simple query has its position (`P`) moved back
+by the length of what LQO added. If LQO's own SELECT fails (it shouldn't), the
+error reaches the client, as the server skips the rest of the batch anyway.
+
+**The guard** runs four times a second. For each applied hint with at least 20
+hinted calls since it was switched on, it takes the median of the latest 200
+hinted calls and compares it with the median of the latest 200 held-out calls,
+when there are at least 5, or else with the median of the latest 200 calls before
+the hint. More than 10% slower and the hint is taken back: the shape's `reverted`
+says why, the hint is ruled out for it (`slower live`), and the shape goes back to
+learning.
+
+**Switches.** `POST /hints/off` and `/hints/on` on the status address turn every
+hint off and on; `POST /shapes/{ID}/off` and `/on` do one shape, by ID, a prefix
+of at least 4 characters, or `database/ID`. `lqo switch` calls them. They're saved
+in the state file (`serve_hints_off`, and `disabled` per shape).
+
+**Fail-safe.** Nothing is applied in shadow mode, with the master switch off,
+while the replica can't be reached (until a connection to it works again), while
+the last save of the state file failed (until one works), or once `lqo serve` is
+shutting down. A failure inside a session's handling turns that session into
+plain passthrough.
+
 ### The status page
 
 `GET /` is a plain-text summary; `GET /status` is JSON:
 
 | Field | What it holds |
 |---|---|
-| `lqo_version`, `mode`, `started` | the running server; `mode` is `shadow` in 0.2 |
+| `lqo_version`, `mode`, `started` | the running server; `mode` is `shadow` or `active` |
 | `connections_open`, `connections_total` | client connections |
 | `watch` | `statements` measured, `dropped` measurements, `shapes` |
-| `learning` | `rounds`, `trials`, `busy_ms`, `proven`, and `replica_down` with `last_error` while the replica can't be reached; absent without `--replica` |
-| `shapes[]` | each shape as in the state file below |
+| `learning` | `rounds`, `trials`, `busy_ms`, `proven`, `applied`, `reverted`, `paused` (why nothing is applied, when nothing is), and `replica_down` with `last_error` while the replica can't be reached; absent without `--replica` |
+| `shapes[]` | each shape as in the state file below, and in active mode `applied`, `hinted_calls`, `hinted_p50_ms`, `holdout_calls`, `holdout_p50_ms`, `before_p50_ms` |
 
 ### In the state file
 
@@ -321,7 +366,7 @@ from `lqo advise` in the same file stay:
     "id": "891f0819ce6bf4ec",
     "database": "shop",
     "normalized": "select sum ( l . qty ) from ...",
-    "example": "SELECT sum(l.qty) FROM ... WHERE c.attrs->>'tier' = 'gold' ...",
+    "example": "SELECT sum(l.qty * p.price) FROM ... WHERE c.attrs->>'tier' = 'gold' ...",
     "calls": 1204, "total_ms": 1288280, "p50_ms": 1061, "p95_ms": 1640,
     "status": "proven", "rounds": 7, "texts_tried": 7,
     "proven": "no nested loop",
@@ -340,9 +385,9 @@ always.
 
 ### Signals
 
-On Ctrl-C or SIGTERM, `lqo serve` stops accepting connections, waits up to
-`--grace` for open ones to end, closes the rest, stops learning, saves the state
-and exits.
+On Ctrl-C or SIGTERM, `lqo serve` stops applying hints, stops accepting
+connections, waits up to `--grace` for open ones to end, closes the rest, stops
+learning, saves the state and exits.
 
 ## Permissions
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -17,7 +18,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/learned-query-optimizer/lqo/internal/hints"
+	"github.com/learned-query-optimizer/lqo/internal/learn"
 	"github.com/learned-query-optimizer/lqo/internal/pgwire"
+	"github.com/learned-query-optimizer/lqo/internal/sqltext"
 	"github.com/learned-query-optimizer/lqo/internal/state"
 )
 
@@ -190,5 +194,99 @@ func TestServeMeasuresAndLearns(t *testing.T) {
 	code, out, _ := runCLI("show", "--state", sp)
 	if code != 0 || !strings.Contains(out, "seen by lqo serve") {
 		t.Errorf("show: %d\n%s", code, out)
+	}
+}
+
+func TestServeActiveWithSwitchesAndPgbench(t *testing.T) {
+	dsn := os.Getenv("LQO_TEST_DSN")
+	if dsn == "" {
+		t.Skip("LQO_TEST_DSN not set")
+	}
+	// The probe's answer shows whether the hint was applied. It sleeps
+	// 10 ms so the guard, which compares hinted calls with earlier ones,
+	// isn't judging LQO's own fraction of a millisecond.
+	const probe = "SELECT current_setting('enable_nestloop') AS v FROM pg_sleep(0.01)"
+	cfg, _ := pgwire.ParseConfig(dsn)
+	sp := filepath.Join(t.TempDir(), "state.json")
+	f := state.New()
+	key := cfg.Database + "/" + sqltext.Fingerprint(probe)
+	f.Serve[key] = &state.Learned{Key: key, ID: sqltext.Fingerprint(probe), Database: cfg.Database, Status: learn.Proven,
+		Proven: "no nested loop", Settings: []hints.Setting{{Name: "enable_nestloop", Value: "off"}}, Arms: map[string]*state.Arm{}}
+	if err := f.Save(sp); err != nil {
+		t.Fatal(err)
+	}
+	r := startServe(t, "--dsn", dsn, "--replica", dsn, "--allow-primary", "--mode", "active", "--holdout", "0", "--min-ms", "1000000", "--state", sp)
+	pcfg, _ := pgwire.ParseConfig(r.via(dsn))
+	c, err := pgwire.Connect(context.Background(), pcfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	get := func() string {
+		v, err := c.QueryValue(context.Background(), probe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	// The learner publishes the hint as it starts.
+	deadline := time.Now().Add(10 * time.Second)
+	for get() != "off" && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if get() != "off" {
+		t.Fatalf("the proven hint isn't applied\n%s", r.stderr.String())
+	}
+	if code, out, errOut := runCLI("switch", "off", "--status", r.status); code != 0 || !strings.Contains(out, "off") {
+		t.Fatalf("switch off: %d %s %s", code, out, errOut)
+	}
+	if get() != "on" {
+		t.Error("applied after lqo switch off")
+	}
+	runCLI("switch", "on", "--status", r.status)
+	if get() != "off" {
+		t.Error("not applied after lqo switch on")
+	}
+	if code, _, _ := runCLI("switch", "off", "zzzzzzzz", "--status", r.status); code != exitRefused {
+		t.Error("an unknown shape should exit 2")
+	}
+	if code, _, _ := runCLI("switch", "off", sqltext.Fingerprint(probe)[:8], "--status", r.status); code != 0 || get() != "on" {
+		t.Error("switching one shape off didn't take")
+	}
+	runCLI("switch", "on", sqltext.Fingerprint(probe)[:8], "--status", r.status)
+
+	// pgbench through the active proxy, every protocol, pipelines too,
+	// with the probe hinted wherever it stands alone.
+	bin, err := exec.LookPath("pgbench")
+	if err != nil {
+		t.Skip("pgbench not found")
+	}
+	script := filepath.Join(t.TempDir(), "p.sql")
+	os.WriteFile(script, []byte("\\set a random(1, 100)\n"+probe+";\nSELECT :a + 1;\n\\startpipeline\n"+probe+";\nSELECT md5(:a::text);\n\\endpipeline\n"), 0o600)
+	for _, mode := range []string{"simple", "extended", "prepared"} {
+		if mode == "simple" {
+			// pipelines need the extended protocol
+			os.WriteFile(script, []byte("\\set a random(1, 100)\n"+probe+";\nSELECT :a + 1;\n"), 0o600)
+		} else {
+			os.WriteFile(script, []byte("\\set a random(1, 100)\n"+probe+";\nSELECT :a + 1;\n\\startpipeline\n"+probe+";\nSELECT md5(:a::text);\n\\endpipeline\n"), 0o600)
+		}
+		out, err := exec.Command(bin, "-n", "-c", "4", "-t", "100", "-M", mode, "-f", script, r.via(dsn)).CombinedOutput()
+		if err != nil || !strings.Contains(string(out), "processed: 400/400") {
+			t.Fatalf("pgbench -M %s through active LQO: %v\n%s", mode, err, out)
+		}
+	}
+	st := r.statusJSON(t)
+	hinted := int64(0)
+	for _, s := range st.Shapes {
+		hinted += s.HintedCalls
+	}
+	if st.Mode != "active" || hinted < 1200 {
+		t.Errorf("mode %s, %d hinted calls", st.Mode, hinted)
+	}
+	if get() != "off" {
+		t.Error("the session lost its way after pgbench")
+	}
+	if v, _ := c.QueryValue(context.Background(), "SHOW enable_nestloop"); v != "on" {
+		t.Error("the hint leaked")
 	}
 }

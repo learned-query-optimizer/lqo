@@ -24,6 +24,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,6 +64,16 @@ type Options struct {
 	SaveEvery     time.Duration
 	Logf          func(format string, args ...any)
 	TimeoutFactor float64
+
+	// Active applies proven hints to live queries; otherwise the learner
+	// only reports (shadow mode).
+	Active bool
+	// Holdout is the share of a hinted shape's calls run without the hint,
+	// to compare against.
+	Holdout float64
+	// GuardCalls is how many hinted calls the guard waits for before it
+	// judges a hint live.
+	GuardCalls int64
 }
 
 // Defaults are the settings lqo serve uses unless told otherwise.
@@ -76,6 +87,8 @@ var Defaults = Options{
 	MinMs:         5,
 	MinCalls:      3,
 	MaxTime:       30 * time.Second,
+	Holdout:       0.1,
+	GuardCalls:    20,
 	Budget:        0.25,
 	RetryKeep:     24 * time.Hour,
 	SaveEvery:     30 * time.Second,
@@ -126,6 +139,12 @@ func (o *Options) fill() {
 	if o.Logf == nil {
 		o.Logf = func(string, ...any) {}
 	}
+	if o.Holdout < 0 || o.Holdout >= 1 {
+		o.Holdout = d.Holdout
+	}
+	if o.GuardCalls <= 0 {
+		o.GuardCalls = d.GuardCalls
+	}
 }
 
 // Learner runs trials on the replica and keeps what they show.
@@ -139,6 +158,8 @@ type Learner struct {
 	conns map[string]*replica // by database
 	stats Stats
 	dirty bool
+
+	saveFailed bool // the state file can't be written: apply nothing
 }
 
 type replica struct {
@@ -155,6 +176,11 @@ type Stats struct {
 	LastError   string    `json:"last_error,omitempty"`
 	LastErrorAt time.Time `json:"last_error_at,omitempty"`
 	Proven      int       `json:"proven"`
+	// In active mode: hints applied now, hints the guard took back, and
+	// why nothing is applied, when nothing is.
+	Applied  int    `json:"applied"`
+	Reverted int    `json:"reverted"`
+	Paused   string `json:"paused,omitempty"`
 }
 
 // New returns a learner fed by col. It loads the state file if there is one;
@@ -180,16 +206,36 @@ func New(col *watch.Collector, opt Options) (*Learner, string, error) {
 	return l, note, nil
 }
 
-// Run tries shapes until ctx ends, then saves the state.
+// Run tries shapes until ctx ends, then saves the state. In active mode it
+// also watches the hints in use and takes back any that run slower live.
 func (l *Learner) Run(ctx context.Context) error {
 	defer l.closeAll()
 	defer l.Save()
+	defer l.col.SetActive(nil) // stopping: apply nothing
+	l.Publish()
+	stopGuard := make(chan struct{})
+	defer close(stopGuard)
+	if l.opt.Active {
+		go func() {
+			t := time.NewTicker(250 * time.Millisecond)
+			defer t.Stop()
+			for {
+				select {
+				case <-stopGuard:
+					return
+				case <-t.C:
+					l.Guard()
+				}
+			}
+		}()
+	}
 	lastSave := time.Now()
 	backoff := time.Second
 	for ctx.Err() == nil {
 		start := time.Now()
 		worked, err := l.round(ctx)
 		busy := time.Since(start)
+		l.Publish()
 		if time.Since(lastSave) > l.opt.SaveEvery {
 			if err := l.Save(); err != nil {
 				l.opt.Logf("saving the state: %v", err)
@@ -245,6 +291,7 @@ func (l *Learner) fail(err error) {
 	defer l.mu.Unlock()
 	l.stats.ReplicaDown = true
 	l.stats.LastError = err.Error()
+	l.publishLocked()
 	l.stats.LastErrorAt = time.Now().UTC()
 	for db, r := range l.conns {
 		if r.conn.Broken() {
@@ -299,7 +346,11 @@ func (l *Learner) replicaFor(ctx context.Context, db string) (*replica, error) {
 	r = &replica{conn: conn, adv: adv}
 	l.mu.Lock()
 	l.conns[db] = r
+	wasDown := l.stats.ReplicaDown
 	l.stats.ReplicaDown = false
+	if wasDown {
+		l.publishLocked()
+	}
 	l.mu.Unlock()
 	return r, nil
 }
@@ -679,10 +730,19 @@ func (l *Learner) Save() error {
 	out := l.file
 	if disk, err := state.Load(l.opt.StatePath); err == nil {
 		disk.Serve = l.file.Serve
+		disk.ServeHintsOff = l.file.ServeHintsOff
 		out = disk
 	}
 	if err := out.Save(l.opt.StatePath); err != nil {
+		if !l.saveFailed {
+			l.saveFailed = true
+			l.publishLocked()
+		}
 		return err
+	}
+	if l.saveFailed {
+		l.saveFailed = false
+		l.publishLocked()
 	}
 	l.dirty = false
 	return nil
@@ -722,4 +782,125 @@ func (l *Learner) Stats() Stats {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.stats
+}
+
+// Publish hands the collector the hints to apply now.
+func (l *Learner) Publish() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.publishLocked()
+}
+
+// publishLocked works out the active set. Nothing is applied in shadow
+// mode, with the master switch off, while the replica can't be reached, or
+// while the state file can't be written: LQO then passes every query
+// through as it came.
+func (l *Learner) publishLocked() {
+	set := &watch.ActiveSet{Hints: map[string]*watch.Hint{}, Holdout: l.opt.Holdout, Off: l.file.ServeHintsOff}
+	paused := ""
+	switch {
+	case !l.opt.Active:
+		paused = "shadow mode"
+	case l.file.ServeHintsOff:
+		paused = "switched off"
+	case l.stats.ReplicaDown:
+		paused = "the replica can't be reached"
+	case l.saveFailed:
+		paused = "the state file can't be written"
+	}
+	if paused == "" {
+		for key, e := range l.file.Serve {
+			if e.Status == Proven && !e.Disabled && e.Proven != "" {
+				set.Hints[key] = watch.NewHint(e.Proven, e.Settings)
+			}
+		}
+	}
+	l.stats.Paused = paused
+	l.stats.Applied = len(set.Hints)
+	l.col.SetActive(set)
+}
+
+// Guard compares each applied hint's live times with the calls held out
+// without it (or, until there are enough of those, with the shape's times
+// before the hint), and takes back a hint whose median is more than
+// Tolerance slower. The hint is ruled out for the shape, which goes back to
+// learning.
+func (l *Learner) Guard() {
+	if !l.opt.Active {
+		return
+	}
+	shapes := l.col.Snapshot()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	changed := false
+	for _, s := range shapes {
+		if !s.Active || s.HintedCalls < l.opt.GuardCalls {
+			continue
+		}
+		ref, against := s.BeforeP50Ms, "before the hint"
+		if s.HoldoutCalls >= 5 {
+			ref, against = s.HoldoutP50Ms, "without it"
+		}
+		if ref <= 0 || s.HintedP50Ms <= ref*(1+l.opt.Tolerance) {
+			continue
+		}
+		e := l.file.Serve[s.Key]
+		if e == nil || e.Status != Proven {
+			continue
+		}
+		why := fmt.Sprintf("live median %s ms with %q against %s ms %s", watch.FormatMs(s.HintedP50Ms), e.Proven, watch.FormatMs(ref), against)
+		if st := e.Arms[e.Proven]; st != nil {
+			st.Out = "slower live: " + why
+		}
+		l.opt.Logf("guard: took back %q for %s %s: %s", e.Proven, e.Database, e.ID[:8], why)
+		l.unprove(e)
+		e.Status, e.Reason = Learning, "the guard took the hint back: "+why
+		e.Reverted, e.RevertedAt = why, time.Now().UTC()
+		l.stats.Reverted++
+		l.dirty = true
+		changed = true
+	}
+	if changed {
+		l.publishLocked()
+	}
+}
+
+// ErrNoShape means a switch named a shape LQO doesn't know, or more than one.
+var ErrNoShape = errors.New("no single shape matches")
+
+// SwitchAll turns every hint off, or back on. It's saved in the state file,
+// so it holds across restarts.
+func (l *Learner) SwitchAll(off bool) error {
+	l.mu.Lock()
+	l.file.ServeHintsOff = off
+	l.dirty = true
+	l.publishLocked()
+	l.mu.Unlock()
+	return l.Save()
+}
+
+// SwitchShape turns one shape's hint off, or back on. id is the shape ID, a
+// prefix of it, or database/ID.
+func (l *Learner) SwitchShape(id string, off bool) (string, error) {
+	l.mu.Lock()
+	var match *state.Learned
+	for key, e := range l.file.Serve {
+		if key == id || e.ID == id || (len(id) >= 4 && strings.HasPrefix(e.ID, id)) {
+			if match != nil {
+				l.mu.Unlock()
+				return "", fmt.Errorf("%w: %q matches more than one; give more of the ID", ErrNoShape, id)
+			}
+			match = e
+		}
+	}
+	if match == nil {
+		l.mu.Unlock()
+		return "", fmt.Errorf("%w: %q", ErrNoShape, id)
+	}
+	match.Disabled = off
+	l.dirty = true
+	l.publishLocked()
+	key := match.Key
+	l.mu.Unlock()
+	return key, l.Save()
 }

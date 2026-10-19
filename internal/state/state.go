@@ -30,6 +30,9 @@ type File struct {
 	// Serve is what lqo serve has learned from live traffic, by database
 	// and shape ID. lqo advise leaves it alone.
 	Serve map[string]*Learned `json:"serve,omitempty"`
+	// ServeHintsOff is lqo serve's master switch: true stops every hint
+	// from being applied, in active mode, until it is switched back on.
+	ServeHintsOff bool `json:"serve_hints_off,omitempty"`
 }
 
 // Learned is what the proxy knows about one shape it has seen live.
@@ -58,7 +61,11 @@ type Learned struct {
 	Gain     float64         `json:"gain,omitempty"`
 	ProvenAt time.Time       `json:"proven_at,omitempty"`
 	Disabled bool            `json:"disabled,omitempty"` // switched off by hand
-	Arms     map[string]*Arm `json:"arms,omitempty"`
+	// Reverted says why the guard took a hint back after it ran slower
+	// live, if it did.
+	Reverted   string          `json:"reverted,omitempty"`
+	RevertedAt time.Time       `json:"reverted_at,omitempty"`
+	Arms       map[string]*Arm `json:"arms,omitempty"`
 }
 
 // Arm is the evidence for one hint on one shape. Each observation is one

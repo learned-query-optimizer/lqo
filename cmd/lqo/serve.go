@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -31,11 +32,15 @@ import (
 const serveUsage = `Usage: lqo serve --dsn SERVER [--replica REPLICA] [flags]
 
 Runs LQO as a proxy in front of a PostgreSQL server. Applications connect to
-LQO instead of the server; LQO passes every message through unchanged. On
-the side it times each query shape and, with --replica, tries the slow
-shapes under each hint on the replica and proves the hints that are clearly
-and consistently faster. In this version it changes nothing: it learns and
-reports, at the status address and with lqo show.
+LQO instead of the server. LQO times each query shape and, with --replica,
+tries the slow shapes under each hint on the replica and proves the hints
+that are clearly and consistently faster.
+
+In shadow mode, the default, it passes every message through unchanged and
+reports what it learned, at the status address and with lqo show. With
+--mode active it also applies proven hints to live queries with SET LOCAL,
+holds some calls out to compare, and takes a hint back when it runs slower
+live. lqo switch turns hints off and on while it runs.
 
 Applications log in to the server through LQO with their own user and
 password; LQO holds no passwords. --dsn needs only the server's address and
@@ -45,12 +50,12 @@ Flags:
 `
 
 type serveFlags struct {
-	dsn, replica, listen, status, tlsCert, tlsKey, statePath, hintSet string
-	port                                                              int
-	allowPrimary, noState, quiet                                      bool
-	minGain, minMs, budget                                            float64
-	maxTime, grace, saveEvery                                         time.Duration
-	session                                                           settingList
+	dsn, replica, listen, status, tlsCert, tlsKey, statePath, hintSet, mode string
+	port                                                                    int
+	allowPrimary, noState, quiet                                            bool
+	minGain, minMs, budget, holdout                                         float64
+	maxTime, grace, saveEvery                                               time.Duration
+	session                                                                 settingList
 }
 
 func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -63,6 +68,8 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	fs.StringVar(&f.listen, "listen", "127.0.0.1", "address to listen on, or a directory for a Unix socket")
 	fs.IntVar(&f.port, "port", proxy.DefaultPort, "port to listen on")
 	fs.StringVar(&f.status, "status", "127.0.0.1:6434", `address of the status page ("" for none)`)
+	fs.StringVar(&f.mode, "mode", "shadow", "shadow (learn and report) or active (also apply proven hints)")
+	fs.Float64Var(&f.holdout, "holdout", d.Holdout*100, "in active mode, percent of a hinted shape's calls run without the hint, to compare")
 	fs.StringVar(&f.tlsCert, "tls-cert", "", "certificate for clients that connect with TLS")
 	fs.StringVar(&f.tlsKey, "tls-key", "", "its private key")
 	fs.BoolVar(&f.allowPrimary, "allow-primary", false, "let --replica be a primary server")
@@ -104,6 +111,14 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if _, err := hints.Set(f.hintSet); err != nil {
 		return usageError{err.Error()}
 	}
+	switch f.mode {
+	case "shadow", "active":
+	default:
+		return usageError{fmt.Sprintf("--mode is shadow or active, not %q", f.mode)}
+	}
+	if f.holdout < 0 || f.holdout >= 100 {
+		return usageError{"--holdout is a percent from 0 to under 100"}
+	}
 	if (f.tlsCert == "") != (f.tlsKey == "") {
 		return usageError{"give both --tls-cert and --tls-key, or neither"}
 	}
@@ -116,6 +131,9 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		if replica, err = pgwire.ParseConfig(f.replica); err != nil {
 			return usageError{"--replica: " + err.Error()}
 		}
+	}
+	if f.mode == "active" && replica == nil {
+		return usageError{"--mode active needs --replica: hints are proven there before they're applied"}
 	}
 	var tlsConf *tls.Config
 	if f.tlsCert != "" {
@@ -154,6 +172,8 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			StatePath:    statePath,
 			SaveEvery:    f.saveEvery,
 			Logf:         logf,
+			Active:       f.mode == "active",
+			Holdout:      f.holdout / 100,
 		})
 		if err != nil {
 			return err
@@ -177,7 +197,7 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			ln.Close()
 			return fmt.Errorf("status page: %w", err)
 		}
-		hs := &http.Server{Handler: statusHandler(srv, col, learner, start), ReadHeaderTimeout: 10 * time.Second}
+		hs := &http.Server{Handler: statusHandler(srv, col, learner, start, f.mode), ReadHeaderTimeout: 10 * time.Second}
 		wg.Add(1)
 		go func() { defer wg.Done(); hs.Serve(sl) }()
 		defer func() {
@@ -203,16 +223,23 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		learnDone <- nil
 		logf("no --replica: measuring only, not learning")
 	}
-	logf("lqo %s listening on %s, in front of %s; shadow mode, nothing is changed", lqo.Version, ln.Addr(), describeUpstream(upstream))
+	if f.mode == "active" {
+		logf("lqo %s listening on %s, in front of %s; active mode, proven hints are applied", lqo.Version, ln.Addr(), describeUpstream(upstream))
+	} else {
+		logf("lqo %s listening on %s, in front of %s; shadow mode, nothing is changed", lqo.Version, ln.Addr(), describeUpstream(upstream))
+	}
 
 	serveErr := srv.Serve(ctx, ln)
+	// Stop learning first: that also stops applying hints, so connections
+	// still open during the grace period are plain passthrough.
+	stopLearning()
+	learnErr := <-learnDone
 	logf("shutting down; waiting up to %s for %d open connections", f.grace, srv.Active())
 	if n := srv.Shutdown(f.grace); n > 0 {
 		logf("closed %d connections that were still open", n)
 	}
-	stopLearning()
-	if err := <-learnDone; err != nil && serveErr == nil {
-		serveErr = fmt.Errorf("learning had stopped: %w", err)
+	if learnErr != nil && serveErr == nil {
+		serveErr = fmt.Errorf("learning had stopped: %w", learnErr)
 	}
 	return serveErr
 }
@@ -224,24 +251,50 @@ func describeUpstream(c *pgwire.Config) string {
 
 // statusReport is what the status page returns as JSON.
 type statusReport struct {
-	Version  string          `json:"lqo_version"`
-	Mode     string          `json:"mode"`
-	Started  time.Time       `json:"started"`
-	Active   int64           `json:"connections_open"`
-	Total    int64           `json:"connections_total"`
-	Watch    watch.Stats     `json:"watch"`
-	Learning *learn.Stats    `json:"learning,omitempty"`
-	Shapes   []state.Learned `json:"shapes"`
+	Version  string        `json:"lqo_version"`
+	Mode     string        `json:"mode"`
+	Started  time.Time     `json:"started"`
+	Active   int64         `json:"connections_open"`
+	Total    int64         `json:"connections_total"`
+	Watch    watch.Stats   `json:"watch"`
+	Learning *learn.Stats  `json:"learning,omitempty"`
+	Shapes   []shapeStatus `json:"shapes"`
 }
 
-func buildStatus(srv *proxy.Server, col *watch.Collector, l *learn.Learner, start time.Time) statusReport {
-	r := statusReport{Version: lqo.Version, Mode: "shadow", Started: start.UTC(), Active: srv.Active(), Total: srv.Total(), Watch: col.Stats()}
+// shapeStatus is a learned shape with, in active mode, how its hint is
+// doing live.
+type shapeStatus struct {
+	state.Learned
+	Applied      bool    `json:"applied,omitempty"`
+	HintedCalls  int64   `json:"hinted_calls,omitempty"`
+	HintedP50Ms  float64 `json:"hinted_p50_ms,omitempty"`
+	HoldoutCalls int64   `json:"holdout_calls,omitempty"`
+	HoldoutP50Ms float64 `json:"holdout_p50_ms,omitempty"`
+	BeforeP50Ms  float64 `json:"before_p50_ms,omitempty"`
+}
+
+func buildStatus(srv *proxy.Server, col *watch.Collector, l *learn.Learner, start time.Time, mode string) statusReport {
+	r := statusReport{Version: lqo.Version, Mode: mode, Started: start.UTC(), Active: srv.Active(), Total: srv.Total(), Watch: col.Stats()}
+	live := col.Snapshot()
 	if l != nil {
 		st := l.Stats()
 		r.Learning = &st
-		r.Shapes = l.Shapes()
+		byKey := map[string]watch.Shape{}
+		for _, s := range live {
+			byKey[s.Key] = s
+		}
+		for _, e := range l.Shapes() {
+			ss := shapeStatus{Learned: e}
+			if s, ok := byKey[e.Key]; ok && s.Active {
+				ss.Applied = true
+				ss.HintedCalls, ss.HintedP50Ms = s.HintedCalls, s.HintedP50Ms
+				ss.HoldoutCalls, ss.HoldoutP50Ms = s.HoldoutCalls, s.HoldoutP50Ms
+				ss.BeforeP50Ms = s.BeforeP50Ms
+			}
+			r.Shapes = append(r.Shapes, ss)
+		}
 	} else {
-		for _, s := range col.Snapshot() {
+		for _, s := range live {
 			e := state.Learned{Key: s.Key, ID: s.ID, Database: s.Database, Normalized: s.Normalized, Calls: s.Calls, TotalMs: s.TotalMs, P50Ms: s.P50Ms, P95Ms: s.P95Ms, LastSeen: s.LastSeen, Status: "measured"}
 			if len(s.Samples) > 0 {
 				e.Example = s.Samples[0].Text
@@ -249,28 +302,74 @@ func buildStatus(srv *proxy.Server, col *watch.Collector, l *learn.Learner, star
 			if s.Skip != "" {
 				e.Status, e.Reason = learn.Skipped, s.Skip
 			}
-			r.Shapes = append(r.Shapes, e)
+			r.Shapes = append(r.Shapes, shapeStatus{Learned: e})
 		}
 	}
 	if r.Shapes == nil {
-		r.Shapes = []state.Learned{}
+		r.Shapes = []shapeStatus{}
 	}
 	return r
 }
 
-func statusHandler(srv *proxy.Server, col *watch.Collector, l *learn.Learner, start time.Time) http.Handler {
+func statusHandler(srv *proxy.Server, col *watch.Collector, l *learn.Learner, start time.Time, mode string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")
-		enc.Encode(buildStatus(srv, col, l, start))
+		enc.Encode(buildStatus(srv, col, l, start, mode))
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		writeStatusText(w, buildStatus(srv, col, l, start))
+		writeStatusText(w, buildStatus(srv, col, l, start, mode))
+	})
+	// The switches. They act at once: the next query of every session
+	// sees the change.
+	sw := func(w http.ResponseWriter, r *http.Request, shape string, off bool) {
+		if l == nil {
+			http.Error(w, "no hints: lqo serve runs without --replica", http.StatusConflict)
+			return
+		}
+		if shape == "" {
+			if err := l.SwitchAll(off); err != nil {
+				http.Error(w, "switched, but the state file couldn't be saved: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			fmt.Fprintf(w, "every hint switched %s\n", onOff(off))
+			return
+		}
+		key, err := l.SwitchShape(shape, off)
+		if errors.Is(err, learn.ErrNoShape) {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, "switched, but the state file couldn't be saved: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprintf(w, "hint for %s switched %s\n", key, onOff(off))
+	}
+	mux.HandleFunc("POST /hints/off", func(w http.ResponseWriter, r *http.Request) { sw(w, r, "", true) })
+	mux.HandleFunc("POST /hints/on", func(w http.ResponseWriter, r *http.Request) { sw(w, r, "", false) })
+	mux.HandleFunc("POST /shapes/{id...}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		switch {
+		case strings.HasSuffix(id, "/off"):
+			sw(w, r, strings.TrimSuffix(id, "/off"), true)
+		case strings.HasSuffix(id, "/on"):
+			sw(w, r, strings.TrimSuffix(id, "/on"), false)
+		default:
+			http.NotFound(w, r)
+		}
 	})
 	return mux
+}
+
+func onOff(off bool) string {
+	if off {
+		return "off"
+	}
+	return "on"
 }
 
 func writeStatusText(w io.Writer, r statusReport) {
@@ -289,6 +388,16 @@ func writeStatusText(w io.Writer, r statusReport) {
 			fmt.Fprintf(w, "; paused: %s", r.Learning.LastError)
 		}
 		fmt.Fprintln(w)
+		if r.Mode == "active" {
+			fmt.Fprintf(w, "applying: %d hints", r.Learning.Applied)
+			if r.Learning.Paused != "" {
+				fmt.Fprintf(w, " (none applied now: %s)", r.Learning.Paused)
+			}
+			if r.Learning.Reverted > 0 {
+				fmt.Fprintf(w, "; %d taken back by the guard", r.Learning.Reverted)
+			}
+			fmt.Fprintln(w)
+		}
 	}
 	shown := 0
 	for _, s := range r.Shapes {
@@ -304,6 +413,16 @@ func writeStatusText(w io.Writer, r statusReport) {
 			fmt.Fprintf(w, "  proven: %q, about %.0f%% faster on the replica\n", s.Proven, s.Gain*100)
 			for _, st := range s.Settings {
 				fmt.Fprintf(w, "    SET LOCAL %s = %s;\n", st.Name, st.Value)
+			}
+			switch {
+			case s.Disabled:
+				fmt.Fprintln(w, "  switched off by hand")
+			case s.Applied:
+				fmt.Fprintf(w, "  applied: %d calls, median %s ms", s.HintedCalls, watch.FormatMs(s.HintedP50Ms))
+				if s.HoldoutCalls > 0 {
+					fmt.Fprintf(w, "; %d held out, median %s ms", s.HoldoutCalls, watch.FormatMs(s.HoldoutP50Ms))
+				}
+				fmt.Fprintf(w, "; %s ms before\n", watch.FormatMs(s.BeforeP50Ms))
 			}
 		case learn.Learning:
 			if s.Rounds > 0 {
@@ -363,4 +482,52 @@ func showServe(w io.Writer, path string, f *state.File) {
 			fmt.Fprintf(w, "  %s: %s\n", s.Status, s.Reason)
 		}
 	}
+}
+
+const switchUsage = `Usage: lqo switch off|on [SHAPE] [--status ADDRESS]
+
+Turns the hints a running lqo serve applies off or on: every hint, or one
+shape's, named by its ID or the start of it (at least 4 characters). The
+change takes effect on the next query and is saved in the state file, so it
+holds across restarts.
+
+Flags:
+`
+
+func cmdSwitch(args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("lqo switch", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	status := fs.String("status", "127.0.0.1:6434", "status address of the running lqo serve")
+	fs.Usage = func() {
+		fmt.Fprint(stderr, switchUsage)
+		fs.PrintDefaults()
+	}
+	rest, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) < 1 || len(rest) > 2 || (rest[0] != "off" && rest[0] != "on") {
+		fs.Usage()
+		return usageError{"say off or on, and optionally a shape"}
+	}
+	path := "/hints/" + rest[0]
+	if len(rest) == 2 {
+		path = "/shapes/" + rest[1] + "/" + rest[0]
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post("http://"+*status+path, "text/plain", nil)
+	if err != nil {
+		return fmt.Errorf("couldn't reach lqo serve at %s: %w", *status, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if resp.StatusCode != http.StatusOK {
+		msg := strings.TrimSpace(string(body))
+		if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusConflict {
+			return usageError{msg}
+		}
+		return errors.New(msg)
+	}
+	fmt.Fprint(stdout, string(body))
+	return nil
 }

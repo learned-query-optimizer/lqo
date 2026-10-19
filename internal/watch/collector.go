@@ -16,10 +16,12 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/learned-query-optimizer/lqo/internal/hints"
 	"github.com/learned-query-optimizer/lqo/internal/proxy"
 	"github.com/learned-query-optimizer/lqo/internal/sqltext"
 )
@@ -41,6 +43,8 @@ type event struct {
 	ms       float64
 	err      bool
 	at       time.Time
+	hinted   bool
+	holdout  bool
 }
 
 // Sample is one complete text of a shape and the time it took live.
@@ -65,7 +69,62 @@ type Shape struct {
 	LastSeen   time.Time `json:"last_seen"`
 	Samples    []Sample  `json:"samples,omitempty"`
 
+	// In active mode, since the shape's hint was switched on: calls run
+	// with the hint, calls held out without it, and the median before.
+	Active       bool    `json:"active,omitempty"`
+	HintedCalls  int64   `json:"hinted_calls,omitempty"`
+	HintedP50Ms  float64 `json:"hinted_p50_ms,omitempty"`
+	HoldoutCalls int64   `json:"holdout_calls,omitempty"`
+	HoldoutP50Ms float64 `json:"holdout_p50_ms,omitempty"`
+	BeforeP50Ms  float64 `json:"before_p50_ms,omitempty"`
+
 	hist [histBuckets]int64
+	// The latest times, exact, for the guard's comparisons.
+	recent, hintedRecent, holdoutRecent ring
+}
+
+// ringSize is how many of the latest times a shape keeps exactly.
+const ringSize = 200
+
+type ring struct {
+	v    []float64
+	next int
+}
+
+func (r *ring) add(ms float64) {
+	if len(r.v) < ringSize {
+		r.v = append(r.v, ms)
+		return
+	}
+	r.v[r.next] = ms
+	r.next = (r.next + 1) % ringSize
+}
+
+func (r *ring) median() float64 {
+	if len(r.v) == 0 {
+		return 0
+	}
+	c := append([]float64(nil), r.v...)
+	sort.Float64s(c)
+	if len(c)%2 == 1 {
+		return c[len(c)/2]
+	}
+	return (c[len(c)/2-1] + c[len(c)/2]) / 2
+}
+
+func quantileOf(h *[histBuckets]int64, n int64, q float64) float64 {
+	if n == 0 {
+		return 0
+	}
+	target := int64(math.Ceil(q * float64(n)))
+	var c int64
+	for b, v := range h {
+		c += v
+		if c >= target {
+			return bucketMs(b)
+		}
+	}
+	return bucketMs(histBuckets - 1)
 }
 
 // histBuckets times, in quarter-powers of two from 10 µs to about 3 hours.
@@ -84,20 +143,7 @@ func bucket(ms float64) int {
 
 func bucketMs(b int) float64 { return 0.01 * math.Pow(2, (float64(b)+0.5)/4) }
 
-func (s *Shape) quantile(q float64) float64 {
-	if s.Calls == 0 {
-		return 0
-	}
-	target := int64(math.Ceil(q * float64(s.Calls)))
-	var n int64
-	for b, c := range s.hist {
-		n += c
-		if n >= target {
-			return bucketMs(b)
-		}
-	}
-	return bucketMs(histBuckets - 1)
-}
+func (s *Shape) quantile(q float64) float64 { return quantileOf(&s.hist, s.Calls, q) }
 
 type grouped struct {
 	id, normalized, skip string
@@ -114,6 +160,74 @@ type Collector struct {
 	cache  map[string]grouped // statement text to its shape
 	shapes map[string]*Shape
 	done   chan struct{}
+
+	// active is the hints sessions apply now; nil or empty in shadow mode.
+	active atomic.Pointer[ActiveSet]
+	// fps caches statement texts' shape IDs for the relay's own lookups.
+	fps  sync.Map
+	fpsN atomic.Int64
+}
+
+// Hint is a proven hint, ready to apply.
+type Hint struct {
+	Name     string
+	Settings []hints.Setting
+	// SQL sets the hint's settings for the current transaction only, and
+	// makes the planner build a fresh plan for prepared statements, so a
+	// cached plan made without the hint isn't reused, and none made with
+	// it is kept.
+	SQL string
+}
+
+// NewHint prepares a hint to apply.
+func NewHint(name string, settings []hints.Setting) *Hint {
+	parts := make([]string, 0, len(settings)+1)
+	for _, st := range settings {
+		parts = append(parts, "set_config("+quoted(st.Name, 0)+", "+quoted(st.Value, 0)+", true)")
+	}
+	parts = append(parts, "set_config('plan_cache_mode', 'force_custom_plan', true)")
+	return &Hint{Name: name, Settings: settings, SQL: "SELECT " + strings.Join(parts, ", ")}
+}
+
+// ActiveSet is what sessions apply: hints by database and shape ID, the
+// share of calls held out to compare against, and the master switch.
+type ActiveSet struct {
+	Hints   map[string]*Hint
+	Holdout float64
+	Off     bool
+}
+
+// SetActive replaces the hints sessions apply. A shape whose hint is new
+// starts its with-and-without counts afresh.
+func (c *Collector) SetActive(set *ActiveSet) {
+	old := c.active.Load()
+	c.mu.Lock()
+	for key, s := range c.shapes {
+		on := set != nil && !set.Off && set.Hints[key] != nil
+		was := old != nil && !old.Off && old.Hints[key] != nil && (set == nil || set.Hints[key] == nil || old.Hints[key].SQL == set.Hints[key].SQL)
+		if on && !was {
+			s.BeforeP50Ms = s.recent.median()
+			s.HintedCalls, s.HoldoutCalls = 0, 0
+			s.hintedRecent, s.holdoutRecent = ring{}, ring{}
+		}
+		s.Active = on
+	}
+	c.mu.Unlock()
+	c.active.Store(set)
+}
+
+// fingerprint is sqltext.Fingerprint with a cache, for the relay.
+func (c *Collector) fingerprint(text string) string {
+	if v, ok := c.fps.Load(text); ok {
+		return v.(string)
+	}
+	fp := sqltext.Fingerprint(text)
+	if c.fpsN.Add(1) > maxCache {
+		c.fps.Clear()
+		c.fpsN.Store(0)
+	}
+	c.fps.Store(text, fp)
+	return fp
 }
 
 // NewCollector starts a collector. Close stops it.
@@ -136,7 +250,8 @@ func (c *Collector) Open(params map[string]string) proxy.Session {
 	if db == "" {
 		db = params["user"]
 	}
-	return &session{c: c, db: db, user: params["user"], stmts: map[string]*statement{}, portals: map[string]*pending{}}
+	// The session opens right after the server said it was ready, idle.
+	return &session{c: c, db: db, user: params["user"], stmts: map[string]*statement{}, portals: map[string]*pending{}, txStatus: 'I'}
 }
 
 func (c *Collector) record(e event) {
@@ -207,12 +322,25 @@ func (c *Collector) add(e event) {
 			c.evict()
 		}
 		s = &Shape{Key: key, ID: g.id, Database: e.db, Normalized: g.normalized, Skip: g.skip, FirstSeen: e.at}
+		if set := c.active.Load(); set != nil && !set.Off && set.Hints[key] != nil {
+			s.Active = true // hinted from its first call: no "before"
+		}
 		c.shapes[key] = s
 	}
 	s.Calls++
 	s.TotalMs += e.ms
 	s.LastSeen = e.at
 	s.hist[bucket(e.ms)]++
+	switch {
+	case e.hinted:
+		s.HintedCalls++
+		s.hintedRecent.add(e.ms)
+	case e.holdout:
+		s.HoldoutCalls++
+		s.holdoutRecent.add(e.ms)
+	default:
+		s.recent.add(e.ms)
+	}
 	if e.err {
 		s.Errors++
 		return
@@ -278,6 +406,9 @@ func (c *Collector) Snapshot() []Shape {
 		cp := *s
 		cp.P50Ms = s.quantile(0.5)
 		cp.P95Ms = s.quantile(0.95)
+		cp.HintedP50Ms = s.hintedRecent.median()
+		cp.HoldoutP50Ms = s.holdoutRecent.median()
+		cp.recent, cp.hintedRecent, cp.holdoutRecent = ring{}, ring{}, ring{}
 		cp.Samples = append([]Sample(nil), s.Samples...)
 		sort.Slice(cp.Samples, func(i, j int) bool { return cp.Samples[i].Ms > cp.Samples[j].Ms })
 		out = append(out, cp)

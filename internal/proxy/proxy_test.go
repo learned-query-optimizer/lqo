@@ -514,19 +514,21 @@ func (w *countingWatcher) Open(params map[string]string) Session {
 	return w
 }
 
-func (w *countingWatcher) FromClient(typ byte, body []byte) {
+func (w *countingWatcher) FromClient(typ byte, body, _ []byte) Action {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.fromCl[typ]++
 	if typ == 'Q' {
 		w.queryLen += len(body)
 	}
+	return Action{}
 }
 
-func (w *countingWatcher) FromServer(typ byte, body []byte) {
+func (w *countingWatcher) FromServer(typ byte, body []byte) Action {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.fromSrv[typ]++
+	return Action{}
 }
 
 func (w *countingWatcher) Close() {
