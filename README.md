@@ -379,7 +379,14 @@ find the trap and leave the other shapes alone.
 `sh scripts/record-tests.sh` runs them all and writes the output to
 [test/results/](test/results/). The Join Order Benchmark, 113 queries in 94 shapes
 over the IMDB data set, runs in the [job workflow](.github/workflows/job.yml) on a
-GitHub runner and records its reports in `test/results/job/`.
+GitHub runner and records its reports in [test/results/job/](test/results/job/). In
+the recorded run (PostgreSQL 16, 4 cores, the 13 standard hints), 35 of the 94
+shapes got a suggestion and 59 stayed on the default plan. The suggestions saved
+21% to 98% per shape, median 48%, and one pass over every tested query went from
+172.6 s to 77.6 s (−55%). One query, JOB 26c, accounts for most of that, 59.2 s to
+1.2 s without parallel workers; without it the pass goes from 113.4 s to 76.4 s
+(−33%). The run used the code released as 0.1.0, built just before the version
+number changed, so its report says `0.1.0-dev`.
 
 CI runs every push on Linux against PostgreSQL 14 and 18, and on macOS and Windows.
 Releases are automated: see [RELEASING.md](RELEASING.md).
