@@ -118,8 +118,15 @@ func serverLine(rep *advisor.Report) string {
 }
 
 func settingsLine(rep *advisor.Report) string {
-	return fmt.Sprintf("%s hints (%d), %d timed runs after a warm-up, up to %d samples per shape, a hint must save %.0f%%",
+	s := fmt.Sprintf("%s hints (%d), %d timed runs after a warm-up, up to %d samples per shape, a hint must save %.0f%%",
 		rep.HintSet, rep.Arms, rep.Repeat, rep.SamplesPer, rep.MinGain*100)
+	switch {
+	case strings.HasPrefix(rep.JoinHints, "pg_hint_plan"):
+		s += "; row-count hints with " + rep.JoinHints
+	case rep.JoinHints != "":
+		s += "; row-count hints " + rep.JoinHints
+	}
+	return s
 }
 
 // Text prints the report for a terminal.

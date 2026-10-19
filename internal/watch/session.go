@@ -24,6 +24,15 @@ type statement struct {
 	text string
 	oids []uint32 // from Parse, then filled in from ParameterDescription
 	key  string   // database and shape ID, worked out when first needed
+
+	// decided is set when LQO decided at Parse time, for a hint with a
+	// comment that had to go in the Parse text: the hint, or the holdout.
+	decided *decision
+}
+
+type decision struct {
+	hint    *Hint
+	holdout bool
 }
 
 type pendingKind uint8
@@ -50,6 +59,9 @@ type pending struct {
 	// For pendInject: replies to pass on first (the client's own, sent
 	// before LQO's messages), then the replies to LQO's messages, to drop.
 	pass, expect []byte
+	// For pendInject with a hint comment: the call it's for, which loses
+	// its hinted mark if the reply says pg_hint_plan isn't loaded.
+	check *pending
 }
 
 // session follows one client connection's requests and replies. The proxy
@@ -76,6 +88,14 @@ type session struct {
 	batch     []byte // the client's messages since the last reply was complete
 	injected  map[string]string
 	rng       *rand.Rand
+
+	// shift is how many characters LQO put in front of the text of the
+	// statement being answered, until the next ReadyForQuery, so error
+	// positions can be moved back.
+	shift int
+	// noHintPlan: this session's server has no pg_hint_plan loaded, so
+	// hints with comments aren't applied here.
+	noHintPlan bool
 }
 
 var _ proxy.Session = (*session)(nil)
@@ -107,6 +127,7 @@ func (s *session) FromClient(typ byte, body, ahead []byte) proxy.Action {
 		if !ok {
 			break
 		}
+		tail := rest // the parameter types, as sent
 		st := &statement{text: text}
 		if len(rest) >= 2 {
 			n := int(binary.BigEndian.Uint16(rest))
@@ -120,6 +141,7 @@ func (s *session) FromClient(typ byte, body, ahead []byte) proxy.Action {
 			s.stmts = map[string]*statement{}
 		}
 		s.stmts[name] = st
+		act = s.hintParse(name, st, tail, ahead)
 	case 'B':
 		m, err := parseBind(body)
 		if err != nil {
@@ -211,7 +233,7 @@ func (s *session) hintFor(st *statement, p *pending) *Hint {
 		st.key = s.db + "/" + s.c.fingerprint(st.text)
 	}
 	h := set.Hints[st.key]
-	if h == nil {
+	if h == nil || (h.Comment != "" && s.noHintPlan) {
 		return nil
 	}
 	if s.rng == nil {
@@ -234,15 +256,66 @@ func (s *session) hintSimple(p *pending) proxy.Action {
 	if h == nil {
 		return proxy.Action{}
 	}
-	prefix := h.SQL + "; "
+	// A hint comment goes first: pg_hint_plan reads it from the start of
+	// the whole query string, and applies it to each statement in it.
+	prefix := h.prefix() + h.SQL + "; "
 	body := make([]byte, 0, len(prefix)+len(p.stmt.text)+1)
 	body = append(body, prefix...)
 	body = append(body, p.stmt.text...)
 	body = append(body, 0)
 	p.hinted = true
 	p.prefixLen = len(prefix)
-	s.push(&pending{kind: pendInject, expect: []byte("TDC")})
+	inj := &pending{kind: pendInject, expect: []byte("TDC")}
+	if h.Comment != "" {
+		inj.check = p
+	}
+	s.push(inj)
 	return proxy.Action{Body: body}
+}
+
+// hintParse decides at Parse time for a shape whose hint has a comment,
+// which has to be in the statement's text when it's planned. Only for the
+// unnamed statement, sent with its Bind, an optional Describe, Execute and
+// Sync in one batch, so the text is planned once, for this call alone.
+func (s *session) hintParse(name string, st *statement, tail, ahead []byte) proxy.Action {
+	if name != "" || !s.fresh("") || !parseBatch(ahead) {
+		return proxy.Action{}
+	}
+	p := &pending{}
+	h := s.hintFor(st, p)
+	switch {
+	case p.holdout:
+		st.decided = &decision{holdout: true}
+		return proxy.Action{}
+	case h == nil:
+		return proxy.Action{}
+	}
+	st.decided = &decision{hint: h}
+	if h.Comment == "" {
+		return proxy.Action{}
+	}
+	prefix := h.prefix()
+	body := make([]byte, 0, 1+len(prefix)+len(st.text)+1+len(tail))
+	body = append(body, 0) // the unnamed statement
+	body = append(body, prefix...)
+	body = append(body, st.text...)
+	body = append(body, 0)
+	body = append(body, tail...)
+	s.shift = len(prefix)
+	return proxy.Action{Body: body}
+}
+
+// parseBatch reports whether ahead is a Bind, an optional Describe, an
+// Execute and a Sync: the rest of one statement's batch after its Parse.
+func parseBatch(ahead []byte) bool {
+	if len(ahead) < 5 || ahead[0] != 'B' {
+		return false
+	}
+	n := int(binary.BigEndian.Uint32(ahead[1:]))
+	if n < 4 || len(ahead) < 1+n {
+		return false
+	}
+	return wholeBatch(ahead[1+n:])
 }
 
 // hintExtended runs the hint's settings, as a statement of LQO's own,
@@ -258,7 +331,22 @@ func (s *session) hintExtended(p *pending, ahead []byte) proxy.Action {
 	if !wholeBatch(ahead) {
 		return proxy.Action{}
 	}
-	h := s.hintFor(p.stmt, p)
+	var h *Hint
+	if d := p.stmt.decided; d != nil {
+		// Decided at Parse, for this batch.
+		p.stmt.decided = nil
+		if d.holdout {
+			p.holdout = true
+			return proxy.Action{}
+		}
+		h = d.hint
+	} else {
+		h = s.hintFor(p.stmt, p)
+		if h != nil && h.Comment != "" {
+			// Its comment would have had to be in the Parse text.
+			return proxy.Action{}
+		}
+	}
 	if h == nil {
 		return proxy.Action{}
 	}
@@ -277,6 +365,9 @@ func (s *session) hintExtended(p *pending, ahead []byte) proxy.Action {
 	before = appendMsg(before, 'B', cstr("lqo_hint"), cstr(name), []byte{0, 0, 0, 0, 0, 0})
 	before = appendMsg(before, 'E', cstr("lqo_hint"), []byte{0, 0, 0, 0})
 	inj := &pending{kind: pendInject, expect: expect}
+	if h.Comment != "" {
+		inj.check = p
+	}
 	if parsed {
 		inj.pass = []byte("1") // the client's own ParseComplete comes first
 	}
@@ -308,6 +399,34 @@ func wholeBatch(ahead []byte) bool {
 }
 
 func cstr(s string) []byte { return append([]byte(s), 0) }
+
+// lastColumn is the text of a DataRow's last column, or "" for NULL or a
+// row it can't read.
+func lastColumn(body []byte) string {
+	if len(body) < 2 {
+		return ""
+	}
+	n := int(binary.BigEndian.Uint16(body))
+	b := body[2:]
+	v := ""
+	for i := 0; i < n; i++ {
+		if len(b) < 4 {
+			return ""
+		}
+		l := int(int32(binary.BigEndian.Uint32(b)))
+		b = b[4:]
+		if l < 0 {
+			v = ""
+			continue
+		}
+		if len(b) < l {
+			return ""
+		}
+		v = string(b[:l])
+		b = b[l:]
+	}
+	return v
+}
 
 func appendMsg(b []byte, typ byte, parts ...[]byte) []byte {
 	n := 4
@@ -358,6 +477,14 @@ func (s *session) FromServer(typ byte, body []byte) proxy.Action {
 			f.pass = f.pass[1:]
 			return proxy.Action{}
 		case len(f.pass) == 0 && len(f.expect) > 0 && typ == f.expect[0]:
+			if typ == 'D' && f.check != nil && lastColumn(body) != "t" {
+				// pg_hint_plan isn't loaded in this session: the comment
+				// did nothing, so the call isn't a hinted one, and comments
+				// aren't put in here again.
+				s.noHintPlan = true
+				f.check.hinted = false
+				s.c.noHintPlan.Add(1)
+			}
 			f.expect = f.expect[1:]
 			if len(f.expect) == 0 {
 				s.queue = s.queue[1:]
@@ -418,6 +545,7 @@ func (s *session) FromServer(typ byte, body []byte) proxy.Action {
 		}
 		return act
 	case 'Z':
+		s.shift = 0
 		if len(body) > 0 {
 			s.txStatus = body[0]
 		}
@@ -444,8 +572,11 @@ func (s *session) FromServer(typ byte, body []byte) proxy.Action {
 // simple query LQO put a hint in front of, so the client points at the
 // right character of its own text.
 func (s *session) fixPosition(body []byte) proxy.Action {
-	f := s.front()
-	if f == nil || f.kind != pendSimple || f.prefixLen == 0 {
+	shift := s.shift
+	if f := s.front(); f != nil && f.kind == pendSimple && f.prefixLen > 0 {
+		shift = f.prefixLen
+	}
+	if shift == 0 {
 		return proxy.Action{}
 	}
 	out := make([]byte, 0, len(body))
@@ -458,8 +589,8 @@ func (s *session) fixPosition(body []byte) proxy.Action {
 			return proxy.Action{}
 		}
 		if code == 'P' {
-			if n, err := strconv.Atoi(val); err == nil && n > f.prefixLen {
-				val = strconv.Itoa(n - f.prefixLen)
+			if n, err := strconv.Atoi(val); err == nil && n > shift {
+				val = strconv.Itoa(n - shift)
 				changed = true
 			}
 		}

@@ -20,7 +20,7 @@ func activeCollector(t *testing.T, holdout float64) *Collector {
 	t.Helper()
 	c := NewCollector()
 	t.Cleanup(c.Close)
-	h := NewHint("no nested loop", []hints.Setting{{Name: "enable_nestloop", Value: "off"}})
+	h := NewHint("no nested loop", []hints.Setting{{Name: "enable_nestloop", Value: "off"}}, "")
 	c.SetActive(&ActiveSet{Hints: map[string]*Hint{"shop/" + c.fingerprint(probe): h}, Holdout: holdout})
 	return c
 }

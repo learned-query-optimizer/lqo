@@ -162,6 +162,7 @@ func cmdAdvise(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	dsn := fs.String("dsn", "", "connection string, such as postgres://user@replica:5432/shop")
 	format := fs.String("format", "auto", "workload format: auto, sql, stderr, csv or json")
 	hintSet := fs.String("hints", d.HintSet, "hint set: standard (13 hints) or full (48)")
+	joinHints := fs.String("join-hints", "auto", "row-count hints with pg_hint_plan: auto (when it's there), on (required) or off")
 	repeat := fs.Int("repeat", d.Repeat, "timed runs per plan, after one warm-up run")
 	samples := fs.Int("samples", d.Samples, "distinct texts tried per query shape")
 	top := fs.Int("top", d.Top, "query shapes tried, slowest first when the log has times")
@@ -234,6 +235,7 @@ func cmdAdvise(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	rep := &advisor.Report{LQOVersion: lqo.Version, Started: time.Now().UTC(), Target: cfg.Describe(), Workload: names}
 	opt := advisor.Options{
 		HintSet:       *hintSet,
+		JoinHints:     *joinHints,
 		Repeat:        *repeat,
 		Samples:       *samples,
 		Top:           *top,
@@ -321,6 +323,7 @@ func saveState(path string, rep *advisor.Report, progress io.Writer) error {
 		if s.Best != nil {
 			e.Hint = s.Best.Name
 			e.Settings = s.Best.Settings
+			e.Comment = s.Best.Comment
 			e.HintMs = s.Best.Ms / float64(max(1, len(s.Samples)))
 			e.Gain = s.Best.Gain
 			e.Change = s.Best.Change
@@ -373,6 +376,9 @@ func cmdShow(args []string, stdout, stderr io.Writer) error {
 			fmt.Fprintf(stdout, "  faster with %q: %.1f ms → %.1f ms (−%.0f%%); %s\n", e.Hint, e.BaselineMs, e.HintMs, e.Gain*100, e.Change)
 			for _, s := range e.Settings {
 				fmt.Fprintf(stdout, "    SET LOCAL %s = %s;\n", s.Name, s.Value)
+			}
+			if e.Comment != "" {
+				fmt.Fprintf(stdout, "    /*+ %s */  -- at the start of the query, with pg_hint_plan\n", e.Comment)
 			}
 		} else {
 			fmt.Fprintf(stdout, "  keep the default plan (%.1f ms): %s\n", e.BaselineMs, e.Reason)

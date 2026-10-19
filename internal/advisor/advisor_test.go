@@ -349,6 +349,10 @@ func TestSyntheticBenchmark(t *testing.T) {
 			offNestloop = true
 		}
 	}
+	// With pg_hint_plan, corrected row counts fix the same trap.
+	if trap.Best.Comment != "" {
+		offNestloop = strings.HasPrefix(trap.Best.Comment, "Rows(")
+	}
 	if !offNestloop || trap.Best.Gain < 0.2 {
 		t.Errorf("trap: hint %q, gain %.2f", trap.Best.Name, trap.Best.Gain)
 	}

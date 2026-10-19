@@ -1,10 +1,11 @@
 # Smoke check of a release build
-# recorded 2026-10-19 08:50 UTC with go1.24.7 linux/amd64
+# recorded 2026-10-19 09:39 UTC with go1.24.7 linux/amd64
 # Linux 6.18.44-fc-v139, Intel(R) Xeon(R) Processor @ 2.80GHz, 2 CPUs
 # server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+# shared_preload_libraries: pg_hint_plan
 # command: sh scripts/smoke.sh lqo $LQO_TEST_DSN
 
-lqo 0.4.0 (go1.24.7, linux/amd64)
+lqo 0.5.0 (go1.24.7, linux/amd64)
 Wrote the workload to demo.sql
 Built the lqo_demo schema in 1s.
 

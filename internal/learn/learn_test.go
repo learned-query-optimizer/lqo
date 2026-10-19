@@ -372,9 +372,10 @@ func TestLearnsTheDemoTrapThroughTheProxy(t *testing.T) {
 			}
 		}
 		if sib != nil && sib.Rounds == 1 {
-			// It starts with the hint its relative proved, alone.
+			// It starts with the hint its relative proved, alone, plus the
+			// row-count hints the round builds when pg_hint_plan is there.
 			a := sib.Arms[trapShape.Proven]
-			if sib.HeadStart != 1 || a == nil || a.N-a.SamePlan < 1 || sib.Trials != 1 {
+			if sib.HeadStart != 1 || a == nil || a.N-a.SamePlan < 1 || sib.Trials > 1+len(sib.JoinHints) {
 				t.Errorf("the relative's first round: head start %d, %d trials, %q %+v", sib.HeadStart, sib.Trials, trapShape.Proven, a)
 			}
 		}

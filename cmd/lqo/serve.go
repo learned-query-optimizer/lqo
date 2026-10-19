@@ -55,12 +55,12 @@ Flags:
 `
 
 type serveFlags struct {
-	dsn, replica, listen, status, tlsCert, tlsKey, statePath, hintSet, mode string
-	port                                                                    int
-	allowPrimary, noState, quiet, share                                     bool
-	minGain, minMs, budget, holdout                                         float64
-	maxTime, grace, saveEvery                                               time.Duration
-	session                                                                 settingList
+	dsn, replica, listen, status, tlsCert, tlsKey, statePath, hintSet, mode, joinHints string
+	port                                                                               int
+	allowPrimary, noState, quiet, share                                                bool
+	minGain, minMs, budget, holdout                                                    float64
+	maxTime, grace, saveEvery                                                          time.Duration
+	session                                                                            settingList
 }
 
 func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -80,6 +80,7 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	fs.StringVar(&f.tlsKey, "tls-key", "", "its private key")
 	fs.BoolVar(&f.allowPrimary, "allow-primary", false, "let --replica be a primary server")
 	fs.StringVar(&f.hintSet, "hints", d.HintSet, "hint set: standard (13 hints) or full (48)")
+	fs.StringVar(&f.joinHints, "join-hints", "auto", "row-count hints with pg_hint_plan: auto (when the replica has it), on (required) or off")
 	fs.Float64Var(&f.minGain, "min-gain", d.MinGain*100, "percent of the time a hint must save")
 	fs.Float64Var(&f.minMs, "min-ms", d.MinMs, "don't try shapes whose median time is under this many ms")
 	fs.Float64Var(&f.budget, "budget", d.Budget*100, "percent of the time the learner may keep the replica busy")
@@ -181,6 +182,7 @@ func cmdServe(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			Active:       f.mode == "active",
 			Holdout:      f.holdout / 100,
 			NoShare:      !f.share,
+			JoinHints:    f.joinHints,
 		})
 		if err != nil {
 			return err
@@ -387,6 +389,9 @@ func writeStatusText(w io.Writer, r statusReport) {
 		fmt.Fprintf(w, " (%d measurements dropped to keep up)", r.Watch.Dropped)
 	}
 	fmt.Fprintln(w)
+	if r.Watch.NoHintPlan > 0 {
+		fmt.Fprintf(w, "row-count hints: not applied in sessions without pg_hint_plan (%s)\n", plural(int(r.Watch.NoHintPlan), "call"))
+	}
 	if r.Learning == nil {
 		fmt.Fprintln(w, "learning: off (no --replica)")
 	} else {
@@ -427,6 +432,9 @@ func writeStatusText(w io.Writer, r statusReport) {
 			fmt.Fprintln(w)
 			for _, st := range s.Settings {
 				fmt.Fprintf(w, "    SET LOCAL %s = %s;\n", st.Name, st.Value)
+			}
+			if s.Comment != "" {
+				fmt.Fprintf(w, "    /*+ %s */\n", s.Comment)
 			}
 			switch {
 			case s.Disabled:
@@ -501,6 +509,9 @@ func showServe(w io.Writer, path string, f *state.File) {
 			fmt.Fprintf(w, "  proven %s: %q, about %.0f%% faster on the replica\n", s.ProvenAt.Format("2006-01-02 15:04 UTC"), s.Proven, s.Gain*100)
 			for _, st := range s.Settings {
 				fmt.Fprintf(w, "    SET LOCAL %s = %s;\n", st.Name, st.Value)
+			}
+			if s.Comment != "" {
+				fmt.Fprintf(w, "    /*+ %s */\n", s.Comment)
 			}
 		case learn.Learning:
 			fmt.Fprintf(w, "  learning: %d rounds on %d texts\n", s.Rounds, s.Texts)

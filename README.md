@@ -89,12 +89,12 @@ a report like this one, from the recorded run in
 Faster with a hint: 2 of 5 tested
 
   1. ef02bfce  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_…  (2 calls)
-     2,373 ms → 1,173 ms (−51%) with "no nested loop"
+     2,414 ms → 1,038 ms (−57%) with "no nested loop"
      Plan: Nested Loop ×3, Bitmap Heap Scan on orders, Index Scan on order_lines, Index Scan on products → Hash Join ×3, Seq Scan on order_lines, Seq Scan on orders, Seq Scan on products
        SET LOCAL enable_nestloop = off;
 
   2. 6c73a7a6  SELECT id, created_at FROM lqo_demo.customers WHERE attrs->>'ti…  (1 call)
-     44.7 ms → 29.7 ms (−34%) with "no index scan"
+     50.2 ms → 30.1 ms (−40%) with "no index scan"
      Plan: Index Scan on customers → Seq Scan on customers
        SET LOCAL enable_indexscan = off;
        SET LOCAL enable_indexonlyscan = off;
@@ -276,6 +276,43 @@ The settings it tries (`lqo hints` lists them):
 `--hints full` tries instead the 48 combinations of join and scan methods used in
 the Bao research paper. It tries more combinations and takes longer.
 
+### Row-count hints, with pg_hint_plan
+
+A planner switch acts on the whole query. Switching off nested loops fixes the
+join that needed it, and takes nested loops away from the joins that were right
+to use them. When the [pg_hint_plan](https://github.com/ossc-db/pg_hint_plan)
+extension is on the server, LQO can be more precise.
+
+The default plan's warm-up run is an `EXPLAIN ANALYZE`, so LQO knows, for each
+join, how many rows the planner expected and how many came out. Where the two are
+more than 2 times apart, LQO writes a pg_hint_plan `Rows` hint that corrects the
+estimate by that factor, and tries the query with all of them as one more hint,
+"row counts". PostgreSQL then plans with the right sizes and picks the joins
+itself. That plan's own run measures joins the default plan didn't have; with
+those corrected too, LQO tries a second hint, "row counts, second pass".
+
+They're built from a shape's first text and tried on its others unchanged, by the
+same rule as every other hint. The report shows a winner as the comment to put at
+the start of the query, in this form, with the factors LQO measured:
+
+```sql
+/*+ Rows(c o *factor) Rows(c l o *factor) */ SELECT ...
+```
+
+LQO uses pg_hint_plan when it's loaded on the server or can be loaded
+(`shared_preload_libraries`, `session_preload_libraries`, or `LOAD` as a
+superuser), and says so at the top of the report. `--join-hints off` turns this
+off; `--join-hints on` refuses to run without it. Without the extension nothing
+changes. LQO only writes `Rows` hints, only for joins it can name with plain
+aliases, and not for joins inside the inner side of a nested loop or over
+partitions, whose numbers aren't the join's own size.
+
+On the demo's trap, in the recorded run with pg_hint_plan, "row counts" took the
+two texts from 2,466 ms to 1,635 ms and from 2,363 ms to 1,644 ms, about a third
+less. Switching off nested loops took more than half off, so that's what LQO
+suggested. Row counts matter more where one query needs different join methods
+in different places, as many in the Join Order Benchmark do.
+
 ## Learn from live traffic: lqo serve
 
 `lqo advise` needs a workload you give it. `lqo serve` finds its own: it runs as a
@@ -297,21 +334,20 @@ only needs the server's address and TLS settings; `--replica` needs a login, lik
 The status page, on `http://127.0.0.1:6434/` by default, shows what it has seen and
 learned, and `/status` has the same as JSON. `lqo show` reads it from the state
 file afterwards. This is the recorded run on the demo, from
-[test/results/serve/demo.txt](test/results/serve/demo.txt), six and a half minutes in, when the first hint was proven:
+[test/results/serve/demo.txt](test/results/serve/demo.txt), eight minutes in, when the first hint was proven:
 
 ```
-lqo 0.4.0, active mode, up 6m29s
+lqo 0.5.0, active mode, up 7m53s
 connections: 0 open, 11 in all
 statements measured: 33 in 2 shapes
-learning: 3 rounds, 9 hint trials, replica busy 1m56s, 1 proven
+learning: 3 rounds, 10 hint trials, replica busy 2m18s, 1 proven
 applying: 1 hint
 
 ef02bfce  lqo_test  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
-  22 calls, 72,147 ms in all, median 2,404 ms, p95 5,717 ms
-  proven: "no nested loop, no sequential scan", about 42% faster on the replica, after 3 rounds
-    SET LOCAL enable_nestloop = off;
-    SET LOCAL enable_seqscan = off;
-  applied: 0 calls, median 0.00 ms; 2,623 ms before
+  22 calls, 70,301 ms in all, median 2,404 ms, p95 4,808 ms
+  proven: "row counts", about 40% faster on the replica, after 3 rounds
+    /*+ Rows(c o *17000) Rows(c l o *17000) Rows(c l o p *17000) */
+  applied: 0 calls, median 0.00 ms; 2,787 ms before
 ```
 
 **How it learns.** Trying all 13 hints on every text would keep the replica busy
@@ -337,15 +373,15 @@ it fails once, the shape goes back to three at a time. Either way a hint is
 proven for the new shape on its own texts, by the same rule, and its own
 results soon outweigh the relatives'. `--share=false` turns it off. In the
 recorded run, three new reports on the same tables as the demo's trap were all
-proven in 212 seconds and 189 seconds of replica time with sharing, against 446
-and 420 seconds without: 11 plan runs instead of 36
+proven in 214 seconds and 186 seconds of replica time with sharing, against 436
+and 413 seconds without: 12 plan runs instead of 33
 ([test/results/serve/shared.txt](test/results/serve/shared.txt)).
 
 **What it costs.** The learner keeps the replica busy at most a quarter of the time
 (`--budget`). The proxy adds time to every query, mostly the extra hop. On the
 two-core test machine, shared by pgbench, PostgreSQL and LQO, a one-row indexed
-SELECT took 0.19 ms straight and 0.49 ms through LQO with prepared statements, and
-0.28 ms against 0.74 ms with plain queries
+SELECT took 0.16 ms straight and 0.47 ms through LQO with prepared statements, and
+0.28 ms against 0.67 ms with plain queries
 ([test/results/serve/overhead.txt](test/results/serve/overhead.txt)). With LQO on
 its own cores, or next to the application, the cost is lower; measure it on yours
 before you rely on it. Measuring never holds traffic up: if LQO falls behind, it drops
@@ -402,6 +438,15 @@ they last for that one statement's transaction and end with it.
 - **Switches.** `lqo switch off` stops every hint, `lqo switch off ef02bfce`
   stops one shape's, and `on` brings them back. They act on the next query and
   are saved in the state file, so they hold across restarts.
+- **Row-count hints.** A proven row-count hint goes in as its pg_hint_plan
+  comment, in front of a plain query or into the text of a prepared statement
+  that is parsed, bound and run in one batch (what most drivers do for a one-off
+  query). A statement prepared earlier and run again by name was planned without
+  it, so it isn't hinted. Each session's first such call checks, in the same
+  round trip, that pg_hint_plan is loaded there; where it isn't, the call counts
+  as unhinted and the session gets no more comments, and the status page says
+  how many calls that was. Load it with `shared_preload_libraries` or
+  `session_preload_libraries` on the primary.
 - **Fail-safe.** When the replica can't be reached, or the state file can't be
   written, LQO applies nothing until they're back. If anything inside LQO's own
   handling of a session fails, that session carries on as plain passthrough.
@@ -415,15 +460,15 @@ the first hint, so it took its place, and the live counts started again:
 
 ```
 ef02bfce  lqo_test  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
-  64 calls, 151,707 ms in all, median 2,021 ms, p95 4,808 ms
-  proven: "no nested loop", about 53% faster on the replica, after 3 rounds
+  62 calls, 152,235 ms in all, median 2,404 ms, p95 4,808 ms
+  proven: "no nested loop", about 49% faster on the replica, after 3 rounds
     SET LOCAL enable_nestloop = off;
-  applied: 10 calls, median 1,061 ms; 4 held out, median 2,158 ms; 2,623 ms before
+  applied: 7 calls, median 1,054 ms; 5 held out, median 2,318 ms; 2,787 ms before
 ```
 
 Applying a hint costs one more statement in the same round trip. With every one of
-pgbench's SELECTs hinted, the one-row SELECT took 0.68 ms through LQO with prepared
-statements and 0.87 ms with plain queries, against 0.49 ms and 0.74 ms unhinted
+pgbench's SELECTs hinted, the one-row SELECT took 0.65 ms through LQO with prepared
+statements and 0.87 ms with plain queries, against 0.47 ms and 0.67 ms unhinted
 ([test/results/serve/overhead.txt](test/results/serve/overhead.txt)).
 
 ## What LQO will and won't run
@@ -480,6 +525,7 @@ lqo version                      print the version
 | `--allow-primary` | off | run on a primary, not only a standby |
 | `--format` | `auto` | workload format: `auto`, `sql`, `stderr`, `csv`, `json` |
 | `--hints` | `standard` | `standard` (13 hints) or `full` (48) |
+| `--join-hints` | `auto` | row-count hints with pg_hint_plan: `auto` when it's there, `on` to require it, `off` |
 | `--top` | 25 | how many shapes to test |
 | `--samples` | 3 | distinct texts tested per shape |
 | `--repeat` | 3 | timed runs per plan, after one warm-up |
@@ -509,6 +555,7 @@ lqo version                      print the version
 | `--tls-cert`, `--tls-key` | none | certificate for clients that connect with TLS |
 | `--status` | `127.0.0.1:6434` | status page address, `""` for none |
 | `--hints` | `standard` | `standard` (13 hints) or `full` (48) |
+| `--join-hints` | `auto` | row-count hints with pg_hint_plan: `auto` when it's there, `on` to require it, `off` |
 | `--min-gain` | 20 | percent of the time a hint must save |
 | `--min-ms` | 5 | don't try shapes whose median time is under this |
 | `--budget` | 25 | percent of the time the learner may keep the replica busy |
@@ -526,7 +573,7 @@ refusal, such as a primary without `--allow-primary`.
 [docs/REFERENCE.md](docs/REFERENCE.md) has the details: workload formats, the
 JSON report, the state file and the connection settings.
 
-## What 0.4 doesn't do
+## What 0.5 doesn't do
 
 - **It changes nothing unless you ask.** `lqo advise` and `lqo serve` in shadow
   mode only report. Only `lqo serve --mode active` applies hints, and only ones
@@ -534,9 +581,11 @@ JSON report, the state file and the connection settings.
 - **It doesn't prove anything for a shape from other shapes' results.** Relatives
   only decide which hints a new shape tries first; each shape still needs its own
   texts to prove one. `lqo advise` tries every hint anyway, so it doesn't share.
-- **Only planner switches.** No join-order hints beyond "as written", and no
-  pg_hint_plan. Plans that need a different join order than any switch produces
-  are out of reach.
+- **Join hints only with pg_hint_plan, and only row counts.** Without the
+  extension, LQO tries planner switches only. With it, LQO corrects row
+  estimates and lets PostgreSQL choose the joins; it doesn't write join-order or
+  join-method hints of its own. Estimates for single tables can't be corrected
+  this way.
 - **PostgreSQL only**, 14 to 18. Earlier versions may work but aren't tested.
 
 ## Building and testing

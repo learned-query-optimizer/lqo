@@ -49,6 +49,29 @@ jobs:
           CGO_ENABLED=0 go build -trimpath -ldflags '-s -w' -o lqo ./cmd/lqo
           sh scripts/smoke.sh ./lqo "$LQO_TEST_DSN"
 
+  # The row-count hints need pg_hint_plan, which the PostgreSQL images above
+  # don't have: here the runner's own PostgreSQL 16, with the extension from
+  # the PostgreSQL apt repository, preloaded.
+  pg-hint-plan:
+    runs-on: ubuntu-latest
+    env:
+      LQO_TEST_DSN: postgres://postgres:lqo@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26.x"
+      - name: PostgreSQL 16 with pg_hint_plan
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-16-pg-hint-plan
+          sudo systemctl start postgresql.service
+          conf=$(sudo -u postgres psql -Atc 'SHOW config_file')
+          echo "shared_preload_libraries = 'pg_hint_plan'" | sudo tee -a "$conf"
+          sudo systemctl restart postgresql.service
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'lqo'"
+      - run: go test -p 1 -count=1 -v -run 'RowCount|JoinHint|Active|Trap|Settings|ReadOnly|Writes' ./internal/advisor ./internal/learn 2>&1 | tee test-output.txt; s=${PIPESTATUS[0]}; [ "$s" -eq 0 ] || sh scripts/ci-annotate.sh test-output.txt; exit "$s"
+
   macos:
     runs-on: macos-latest
     steps:

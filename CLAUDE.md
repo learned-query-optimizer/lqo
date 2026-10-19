@@ -45,6 +45,17 @@ alone each round while it's a clear win on every own text (focus). Proof stays
 per shape. `--share=false` turns it off. `test/results/serve/shared.txt`
 compares three new relatives with and without it.
 
+v0.5.0 adds row-count hints with pg_hint_plan (October 2026), optional
+(`--join-hints auto|on|off`): from the default plan's EXPLAIN ANALYZE, joins whose
+estimate was over 2x off get `Rows(aliases *factor)` hints (`plan.Corrections`),
+tried as the arms "row counts" and "row counts, second pass", built from a
+shape's first text and kept for its others. Active mode puts a proven comment in
+front of a simple Query or into an unnamed one-batch Parse, and checks per
+session that pg_hint_plan is loaded. The local test server preloads pg_hint_plan
+(`shared_preload_libraries`, built from source into Postgres 16, which needs
+postgresql-server-dev-16); the `pg-hint-plan` CI job and the JOB workflow
+install it from apt. The JOB run with it writes to `test/results/job-join-hints/`.
+
 The code is Go with no dependencies: `internal/pgwire` is LQO's own small
 PostgreSQL client (simple query protocol, trust/md5/SCRAM, TLS), because pgx and
 golang.org/x modules can't be fetched from a cloud session. Keep it
@@ -90,10 +101,8 @@ Agreed with the owner in October 2026: v0.2.0 (shadow mode) and v0.3.0 (active
 mode) are done. On October 19 the owner said go for both of these, in this order:
 
 1. **v0.4.0, shared learning.** Done, October 2026.
-2. **v0.5.0, pg_hint_plan.** Optional: when the pg_hint_plan extension is on the
-   replica (and, for active mode, the primary), LQO also tries hints it can't
-   express with planner settings, built from the row counts its own trials
-   measured, and applies a proven one as a hint comment. Without the extension
-   nothing changes. The Join Order Benchmark runs again with it.
+2. **v0.5.0, pg_hint_plan.** Done, October 2026.
+
+Both done. Nothing further is agreed.
 
 Later ideas are decided with the owner before they go here.

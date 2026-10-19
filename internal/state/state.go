@@ -58,9 +58,12 @@ type Learned struct {
 	// proven.
 	Proven   string          `json:"proven,omitempty"`
 	Settings []hints.Setting `json:"settings,omitempty"`
-	Gain     float64         `json:"gain,omitempty"`
-	ProvenAt time.Time       `json:"proven_at,omitempty"`
-	Disabled bool            `json:"disabled,omitempty"` // switched off by hand
+	// Comment is the proven hint's pg_hint_plan hints, when it's one LQO
+	// built from measured row counts.
+	Comment  string    `json:"hint_comment,omitempty"`
+	Gain     float64   `json:"gain,omitempty"`
+	ProvenAt time.Time `json:"proven_at,omitempty"`
+	Disabled bool      `json:"disabled,omitempty"` // switched off by hand
 	// Reverted says why the guard took a hint back after it ran slower
 	// live, if it did.
 	Reverted   string          `json:"reverted,omitempty"`
@@ -69,8 +72,11 @@ type Learned struct {
 	// Family groups shapes that read the same tables; with sharing on, a
 	// shape's learning starts from its relatives' results. HeadStart is how
 	// many relatives' results it started from, when it last chose hints.
-	Family    string `json:"family,omitempty"`
-	HeadStart int    `json:"head_start,omitempty"`
+	// JoinHints are the row-count hints LQO built for this shape from what
+	// its first trial measured, tried as hints of their own.
+	JoinHints []JoinHint `json:"join_hints,omitempty"`
+	Family    string     `json:"family,omitempty"`
+	HeadStart int        `json:"head_start,omitempty"`
 	// What learning has cost this shape on the replica, in all and up to
 	// the round its first hint was proven.
 	Trials        int     `json:"trials,omitempty"`
@@ -78,6 +84,13 @@ type Learned struct {
 	RoundsToProof int     `json:"rounds_to_proof,omitempty"`
 	TrialsToProof int     `json:"trials_to_proof,omitempty"`
 	BusyToProofMs float64 `json:"busy_to_proof_ms,omitempty"`
+}
+
+// JoinHint is a hint LQO built for one shape: pg_hint_plan hints in a
+// comment.
+type JoinHint struct {
+	Name    string `json:"name"`
+	Comment string `json:"comment"`
 }
 
 // Arm is the evidence for one hint on one shape. Each observation is one
@@ -116,6 +129,7 @@ type Entry struct {
 	BaselineMs float64         `json:"baseline_ms,omitempty"`
 	Hint       string          `json:"hint,omitempty"`
 	Settings   []hints.Setting `json:"settings,omitempty"`
+	Comment    string          `json:"hint_comment,omitempty"`
 	HintMs     float64         `json:"hint_ms,omitempty"`
 	Gain       float64         `json:"gain,omitempty"`
 	Change     string          `json:"plan_change,omitempty"`

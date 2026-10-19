@@ -1,11 +1,14 @@
 name: job
 
 # Runs the Join Order Benchmark through lqo advise on a GitHub runner, with
-# the PostgreSQL 16 the runner image comes with, and commits the reports to
-# test/results/job/. It runs when the benchmark script or this file changes,
-# or by hand. A run with the standard hints takes about 75 minutes on a
-# standard runner. By hand, it can use the full hint set, another runner (a
-# larger one, once set up for the organisation) and another results folder.
+# the PostgreSQL 16 the runner image comes with and pg_hint_plan from the
+# PostgreSQL apt repository, preloaded, so LQO also tries its row-count
+# hints. It commits the reports to test/results/job-join-hints/ (the 0.1 run
+# without pg_hint_plan is in test/results/job/). It runs when the benchmark
+# script or this file changes, or by hand. A run with the standard hints
+# takes about 75 minutes on a standard runner, more with row-count hints. By
+# hand, it can use the full hint set, another runner (a larger one, once set
+# up for the organisation), another results folder, and no join hints.
 #
 # The commit it makes uses the workflow's own token, so it doesn't start the
 # test or release workflows.
@@ -26,7 +29,10 @@ on:
         default: ubuntu-latest
       out:
         description: "results folder under test/results"
-        default: job
+        default: job-join-hints
+      join_hints:
+        description: "row-count hints with pg_hint_plan: auto, on or off"
+        default: "on"
 
 permissions:
   contents: write
@@ -51,20 +57,24 @@ jobs:
           echo "shared_buffers = 4GB" | sudo tee -a "$conf"
           echo "work_mem = 64MB" | sudo tee -a "$conf"
           echo "effective_cache_size = 10GB" | sudo tee -a "$conf"
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-16-pg-hint-plan
+          echo "shared_preload_libraries = 'pg_hint_plan'" | sudo tee -a "$conf"
           sudo systemctl restart postgresql.service
           sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'lqo'" -c "CREATE DATABASE imdb"
       - name: Load IMDB and run JOB through lqo advise
         env:
           LQO_DSN: postgres://postgres:lqo@localhost:5432/imdb?sslmode=disable
           JOB_HINTS: ${{ inputs.hints || 'standard' }}
-          JOB_OUT: ${{ inputs.out || 'job' }}
+          JOB_OUT: ${{ inputs.out || 'job-join-hints' }}
+          JOB_JOIN_HINTS: ${{ inputs.join_hints || 'on' }}
           JOB_LIMIT: 320m
         run: bash scripts/job.sh
       - name: Commit the results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "test/results/${{ inputs.out || 'job' }}"
+          git add "test/results/${{ inputs.out || 'job-join-hints' }}"
           if git diff --cached --quiet; then
             echo "Nothing changed."
             exit 0

@@ -77,6 +77,8 @@ type Options struct {
 	GuardCalls int64
 	// NoShare stops shapes from starting with their relatives' results.
 	NoShare bool
+	// JoinHints is passed to the advisor: auto, on or off.
+	JoinHints string
 	// ShareWeight is how many texts' worth of evidence the relatives' results
 	// count for, at most, when a shape's hints are drawn.
 	ShareWeight float64
@@ -348,6 +350,7 @@ func (l *Learner) replicaFor(ctx context.Context, db string) (*replica, error) {
 		MaxTime:       l.opt.MaxTime,
 		AllowPrimary:  l.opt.AllowPrimary,
 		Session:       l.opt.Session,
+		JoinHints:     l.opt.JoinHints,
 	}, rep)
 	if err != nil {
 		conn.Close()
@@ -437,9 +440,11 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	arms := r.adv.Arms()
+	static := r.adv.Arms()
 
 	l.mu.Lock()
+	extras := joinArms(e)
+	arms := append(append([]hints.Arm(nil), static...), extras...)
 	text := sh.Samples[e.Rounds%len(sh.Samples)].Text
 	if s := suspectText(e); s != "" {
 		text = s
@@ -461,6 +466,7 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 		// its head start fades and the shape is back to a few at a time.
 		timed = 1
 	}
+	r.adv.SetExtra(extras)
 	sr, err := r.adv.Trial(ctx, text, want, timed)
 	busy := time.Since(start)
 	if err != nil {
@@ -468,6 +474,17 @@ func (l *Learner) round(ctx context.Context) (bool, error) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if len(e.JoinHints) == 0 {
+		// The trial built this shape's row-count hints from what the
+		// default plan measured: they're its own hints from now on.
+		for _, x := range r.adv.Extra() {
+			e.JoinHints = append(e.JoinHints, state.JoinHint{Name: x.Name, Comment: x.Comment})
+			if e.Arms[x.Name] == nil {
+				e.Arms[x.Name] = &state.Arm{}
+			}
+		}
+		arms = append(append([]hints.Arm(nil), static...), joinArms(e)...)
+	}
 	l.stats.Rounds++
 	// A trial is a plan run, however many hints gave that plan.
 	plans := map[string]bool{}
@@ -546,6 +563,25 @@ func (l *Learner) choose(e *state.Learned, arms []hints.Arm, text string) (want 
 		out = append(out, c.i)
 	}
 	return out, focus
+}
+
+// joinArms are the row-count hints built for e, as arms.
+func joinArms(e *state.Learned) []hints.Arm {
+	out := make([]hints.Arm, 0, len(e.JoinHints))
+	for _, j := range e.JoinHints {
+		out = append(out, hints.Arm{Name: j.Name, Comment: j.Comment})
+	}
+	return out
+}
+
+// cost is how much an arm changes, to break ties between equally fast
+// arms: one per setting, and one per row-count hint plus one, so a plain
+// switch wins a tie with a comment.
+func cost(a hints.Arm) int {
+	if a.Comment != "" {
+		return strings.Count(a.Comment, "Rows(") + 1
+	}
+	return len(a.Settings)
 }
 
 // suspectText is a text some hint must be tried on again, if any.
@@ -788,23 +824,23 @@ func (l *Learner) settle(e *state.Learned, arms []hints.Arm) {
 			continue
 		}
 		if best == "" {
-			best, bestN = a.Name, len(a.Settings)
+			best, bestN = a.Name, cost(a)
 			continue
 		}
 		b := e.Arms[best]
 		// Clearly faster wins; within 2%, fewer settings.
 		switch {
 		case st.Mean < b.Mean+math.Log(0.98):
-			best, bestN = a.Name, len(a.Settings)
-		case st.Mean <= b.Mean-math.Log(0.98) && len(a.Settings) < bestN:
-			best, bestN = a.Name, len(a.Settings)
+			best, bestN = a.Name, cost(a)
+		case st.Mean <= b.Mean-math.Log(0.98) && cost(a) < bestN:
+			best, bestN = a.Name, cost(a)
 		}
 	}
 	if best != "" {
 		if e.Status != Proven || e.Proven != best {
 			for _, a := range arms {
 				if a.Name == best {
-					e.Settings = a.Settings
+					e.Settings, e.Comment = a.Settings, a.Comment
 				}
 			}
 			if e.Status != Proven {
@@ -845,7 +881,7 @@ func (l *Learner) unprove(e *state.Learned) {
 	if e.Status == Proven {
 		l.stats.Proven--
 	}
-	e.Proven, e.Settings, e.Gain = "", nil, 0
+	e.Proven, e.Settings, e.Comment, e.Gain = "", nil, "", 0
 }
 
 // Save writes the state file, if there is one.
@@ -944,7 +980,7 @@ func (l *Learner) publishLocked() {
 	if paused == "" {
 		for key, e := range l.file.Serve {
 			if e.Status == Proven && !e.Disabled && e.Proven != "" {
-				set.Hints[key] = watch.NewHint(e.Proven, e.Settings)
+				set.Hints[key] = watch.NewHint(e.Proven, e.Settings, e.Comment)
 			}
 		}
 	}

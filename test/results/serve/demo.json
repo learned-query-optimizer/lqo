@@ -1,18 +1,18 @@
 {
-  "lqo_version": "0.4.0",
+  "lqo_version": "0.5.0",
   "mode": "active",
-  "started": "2026-10-19T08:56:44.338016387Z",
+  "started": "2026-10-19T09:45:07.582604593Z",
   "connections_open": 0,
-  "connections_total": 32,
+  "connections_total": 31,
   "watch": {
-    "statements": 96,
+    "statements": 93,
     "dropped": 0,
     "shapes": 2
   },
   "learning": {
     "rounds": 4,
-    "trials": 12,
-    "busy_ms": 157762.91,
+    "trials": 13,
+    "busy_ms": 179444.54,
     "last_error_at": "0001-01-01T00:00:00Z",
     "proven": 1,
     "applied": 1,
@@ -24,17 +24,17 @@
       "id": "ef02bfce3698bbb1",
       "database": "lqo_test",
       "normalized": "select sum ( l . qty * p . price ) from lqo_demo . customers c join lqo_demo . orders o on o . customer_id = c . id join lqo_demo . order_lines l on l . order_id = o . id join lqo_demo . products p on p . id = l . product_id where c . attrs -\u003e\u003e ? = ? and c . attrs -\u003e\u003e ? = ?",
-      "example": "SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON o.customer_id = c.id JOIN lqo_demo.order_lines l ON l.order_id = o.id JOIN lqo_demo.products p ON p.id = l.product_id WHERE c.attrs-\u003e\u003e'tier' = 'basic' AND c.attrs-\u003e\u003e'channel' = 'web'",
-      "calls": 64,
-      "total_ms": 151707.31000000006,
-      "p50_ms": 2021.406573078696,
+      "example": "SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON o.customer_id = c.id JOIN lqo_demo.order_lines l ON l.order_id = o.id JOIN lqo_demo.products p ON p.id = l.product_id WHERE c.attrs-\u003e\u003e'tier' = 'gold' AND c.attrs-\u003e\u003e'channel' = 'partner'",
+      "calls": 62,
+      "total_ms": 152235.38100000005,
+      "p50_ms": 2403.871079018453,
       "p95_ms": 4807.742158036906,
-      "last_seen": "2026-10-19T12:06:14.613674459+03:00",
+      "last_seen": "2026-10-19T12:55:58.470086729+03:00",
       "status": "proven",
       "rounds": 4,
       "texts_tried": 4,
-      "last_tried": "2026-10-19T09:05:23.882109194Z",
-      "baseline_ms": 2224.614,
+      "last_tried": "2026-10-19T09:55:12.588834864Z",
+      "baseline_ms": 2314.471,
       "proven": "no nested loop",
       "settings": [
         {
@@ -42,20 +42,20 @@
           "value": "off"
         }
       ],
-      "gain": 0.5273221813355502,
-      "proven_at": "2026-10-19T09:05:23.882121558Z",
+      "gain": 0.48823883009895885,
+      "proven_at": "2026-10-19T09:55:12.588842622Z",
       "reverted_at": "0001-01-01T00:00:00Z",
       "arms": {
         "hash join only": {
           "n": 3,
-          "mean_log_ratio": -0.7479793556241889,
-          "m2": 0.0051425232766083165,
-          "max_ratio": 0.5015013840603358,
-          "strict_wins": 3,
+          "mean_log_ratio": -0.6825634226032895,
+          "m2": 0.10978707668829166,
+          "max_ratio": 0.6467836494818903,
+          "strict_wins": 2,
           "same_plan": 0,
           "texts": 3,
-          "sum_ms": 3398.969,
-          "sum_base_ms": 7190.878999999999
+          "sum_ms": 3598.659,
+          "sum_base_ms": 7031.911
         },
         "join order as written": {
           "n": 3,
@@ -69,14 +69,16 @@
         },
         "merge join only": {
           "n": 2,
-          "mean_log_ratio": -0.2831793943023828,
-          "m2": 0.10686124475024071,
-          "max_ratio": 0.9493015781653162,
-          "strict_wins": 0,
+          "mean_log_ratio": -0.27766455778307075,
+          "m2": 0.22626372551930304,
+          "max_ratio": 1.0604424697691464,
+          "strict_wins": 1,
           "same_plan": 0,
-          "texts": 2,
-          "sum_ms": 5267.268,
-          "sum_base_ms": 7382.116
+          "texts": 3,
+          "sum_ms": 4793.889,
+          "sum_base_ms": 6763.489,
+          "suspect_text": "SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON o.customer_id = c.id JOIN lqo_demo.order_lines l ON l.order_id = o.id JOIN lqo_demo.products p ON p.id = l.product_id WHERE c.attrs-\u003e\u003e'tier' = 'gold' AND c.attrs-\u003e\u003e'channel' = 'partner'",
+          "suspect_why": "it was 64% slower on a text, twice"
         },
         "nested loop only": {
           "n": 3,
@@ -95,9 +97,7 @@
           "max_ratio": 0,
           "strict_wins": 0,
           "same_plan": 0,
-          "texts": 1,
-          "suspect_text": "SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON o.customer_id = c.id JOIN lqo_demo.order_lines l ON l.order_id = o.id JOIN lqo_demo.products p ON p.id = l.product_id WHERE c.attrs-\u003e\u003e'tier' = 'gold' AND c.attrs-\u003e\u003e'channel' = 'partner'",
-          "suspect_why": "it was 108% slower on a text, twice"
+          "texts": 0
         },
         "no hash join": {
           "n": 3,
@@ -110,13 +110,15 @@
           "ruled_out": "it doesn't change the plan"
         },
         "no index scan": {
-          "n": 0,
-          "mean_log_ratio": 0,
+          "n": 1,
+          "mean_log_ratio": -0.11694951107973212,
           "m2": 0,
-          "max_ratio": 0,
+          "max_ratio": 0.8896301084931542,
           "strict_wins": 0,
           "same_plan": 0,
-          "texts": 0
+          "texts": 1,
+          "sum_ms": 4074.7630000000004,
+          "sum_base_ms": 4580.289
         },
         "no memoize": {
           "n": 3,
@@ -140,27 +142,16 @@
         },
         "no nested loop": {
           "n": 3,
-          "mean_log_ratio": -0.7479793556241889,
-          "m2": 0.0051425232766083165,
-          "max_ratio": 0.5015013840603358,
-          "strict_wins": 3,
-          "same_plan": 0,
-          "texts": 3,
-          "sum_ms": 3398.969,
-          "sum_base_ms": 7190.878999999999
-        },
-        "no nested loop, no sequential scan": {
-          "n": 4,
-          "mean_log_ratio": -0.4342198062887376,
-          "m2": 0.15001728752356439,
-          "max_ratio": 0.8106417562777183,
+          "mean_log_ratio": -0.6825634226032895,
+          "m2": 0.10978707668829166,
+          "max_ratio": 0.6467836494818903,
           "strict_wins": 2,
           "same_plan": 0,
-          "texts": 4,
-          "sum_ms": 7519.878,
-          "sum_base_ms": 12144.161999999998
+          "texts": 3,
+          "sum_ms": 3598.659,
+          "sum_base_ms": 7031.911
         },
-        "no parallel workers": {
+        "no nested loop, no sequential scan": {
           "n": 0,
           "mean_log_ratio": 0,
           "m2": 0,
@@ -169,30 +160,55 @@
           "same_plan": 0,
           "texts": 0
         },
-        "no sequential scan": {
-          "n": 1,
-          "mean_log_ratio": -0.06555360522151382,
+        "no parallel workers": {
+          "n": 0,
+          "mean_log_ratio": 0,
           "m2": 0,
-          "max_ratio": 0.9365488415059006,
+          "max_ratio": 0,
           "strict_wins": 0,
           "same_plan": 0,
           "texts": 2,
-          "sum_ms": 2376.429,
-          "sum_base_ms": 2537.432
+          "ruled_out": "it was 52% slower on a text, twice"
+        },
+        "no sequential scan": {
+          "n": 0,
+          "mean_log_ratio": 0,
+          "m2": 0,
+          "max_ratio": 0,
+          "strict_wins": 0,
+          "same_plan": 0,
+          "texts": 0
+        },
+        "row counts": {
+          "n": 4,
+          "mean_log_ratio": -0.38509995696926624,
+          "m2": 0.1904173284406548,
+          "max_ratio": 0.8492497853721217,
+          "strict_wins": 2,
+          "same_plan": 0,
+          "texts": 4,
+          "sum_ms": 7588.236000000001,
+          "sum_base_ms": 11612.199999999999
         }
       },
+      "join_hints": [
+        {
+          "name": "row counts",
+          "comment": "Rows(c o *17000) Rows(c l o *17000) Rows(c l o p *17000)"
+        }
+      ],
       "family": "lqo_demo.customers,lqo_demo.order_lines,lqo_demo.orders,lqo_demo.products",
-      "trials": 12,
-      "busy_ms": 157762.91,
+      "trials": 13,
+      "busy_ms": 179444.54,
       "rounds_to_proof": 3,
-      "trials_to_proof": 9,
-      "busy_to_proof_ms": 116219.97300000001,
+      "trials_to_proof": 10,
+      "busy_to_proof_ms": 137815.488,
       "applied": true,
-      "hinted_calls": 10,
-      "hinted_p50_ms": 1060.7095,
-      "holdout_calls": 4,
-      "holdout_p50_ms": 2158.0485,
-      "before_p50_ms": 2623.2215
+      "hinted_calls": 7,
+      "hinted_p50_ms": 1054.203,
+      "holdout_calls": 5,
+      "holdout_p50_ms": 2317.501,
+      "before_p50_ms": 2787.1805
     },
     {
       "key": "lqo_test/5fcb12e39b337776",
@@ -200,11 +216,11 @@
       "database": "lqo_test",
       "normalized": "select c . id , count ( * ) , sum ( l . qty ) from lqo_demo . customers c join lqo_demo . orders o on o . customer_id = c . id join lqo_demo . order_lines l on l . order_id = o . id where c . id = ? group by c . id",
       "example": "SELECT c.id, count(*), sum(l.qty) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON o.customer_id = c.id JOIN lqo_demo.order_lines l ON l.order_id = o.id WHERE c.id = 4242 GROUP BY c.id",
-      "calls": 32,
-      "total_ms": 25.322000000000006,
-      "p50_ms": 0.697924948905765,
+      "calls": 31,
+      "total_ms": 24.631,
+      "p50_ms": 0.8299773149766462,
       "p95_ms": 0.9870149282610821,
-      "last_seen": "2026-10-19T12:06:14.614682515+03:00",
+      "last_seen": "2026-10-19T12:55:58.470909346+03:00",
       "status": "learning",
       "rounds": 0,
       "texts_tried": 0,

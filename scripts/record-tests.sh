@@ -17,12 +17,14 @@ cd "$(dirname "$0")/.."
 out=test/results
 mkdir -p "$out/demo"
 server=$(psql "$LQO_TEST_DSN" -Atc 'SELECT version()' 2>/dev/null || echo "unknown, psql not found")
+preload=$(psql "$LQO_TEST_DSN" -Atc "SELECT coalesce(nullif(current_setting('shared_preload_libraries'), ''), 'nothing')" 2>/dev/null || echo "unknown")
 
 header() {
 	echo "# $1"
 	echo "# recorded $(date -u '+%Y-%m-%d %H:%M UTC') with $(go version | cut -d' ' -f3-)"
 	echo "# $(uname -sr), $(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ //'), $(nproc 2>/dev/null || echo '?') CPUs"
 	echo "# server: $server"
+	echo "# shared_preload_libraries: $preload"
 	echo "# command: $2"
 	echo
 }

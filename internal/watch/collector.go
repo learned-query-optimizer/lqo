@@ -151,10 +151,13 @@ type grouped struct {
 
 // Collector gathers the reports of every session.
 type Collector struct {
-	ch       chan event
-	dropped  atomic.Int64
-	seen     atomic.Int64
-	inflight atomic.Int64
+	ch      chan event
+	dropped atomic.Int64
+	// noHintPlan counts calls a hint comment was put in front of, in a
+	// session without pg_hint_plan: they're counted as unhinted.
+	noHintPlan atomic.Int64
+	seen       atomic.Int64
+	inflight   atomic.Int64
 
 	mu     sync.Mutex
 	cache  map[string]grouped // statement text to its shape
@@ -172,22 +175,42 @@ type Collector struct {
 type Hint struct {
 	Name     string
 	Settings []hints.Setting
+	// Comment is pg_hint_plan hints, for a hint LQO built from measured
+	// row counts; they go in a /*+ ... */ comment at the start of the
+	// query.
+	Comment string
 	// SQL sets the hint's settings for the current transaction only, and
 	// makes the planner build a fresh plan for prepared statements, so a
 	// cached plan made without the hint isn't reused, and none made with
-	// it is kept.
+	// it is kept. With a Comment, its last column also says whether
+	// pg_hint_plan is loaded in the session.
 	SQL string
 }
 
 // NewHint prepares a hint to apply.
-func NewHint(name string, settings []hints.Setting) *Hint {
-	parts := make([]string, 0, len(settings)+1)
+func NewHint(name string, settings []hints.Setting, comment string) *Hint {
+	parts := make([]string, 0, len(settings)+2)
 	for _, st := range settings {
 		parts = append(parts, "set_config("+quoted(st.Name, 0)+", "+quoted(st.Value, 0)+", true)")
 	}
 	parts = append(parts, "set_config('plan_cache_mode', 'force_custom_plan', true)")
-	return &Hint{Name: name, Settings: settings, SQL: "SELECT " + strings.Join(parts, ", ")}
+	if comment != "" {
+		parts = append(parts, "coalesce(current_setting('pg_hint_plan.enable_hint', true), 'off') = 'on'")
+	}
+	return &Hint{Name: name, Settings: settings, Comment: comment, SQL: "SELECT " + strings.Join(parts, ", ")}
 }
+
+// prefix is what goes in front of the query's own text for a hint with a
+// comment.
+func (h *Hint) prefix() string {
+	if h.Comment == "" {
+		return ""
+	}
+	return "/*+ " + h.Comment + " */ "
+}
+
+// same reports whether two hints apply the very same thing.
+func (h *Hint) same(o *Hint) bool { return h.SQL == o.SQL && h.Comment == o.Comment }
 
 // ActiveSet is what sessions apply: hints by database and shape ID, the
 // share of calls held out to compare against, and the master switch.
@@ -204,7 +227,7 @@ func (c *Collector) SetActive(set *ActiveSet) {
 	c.mu.Lock()
 	for key, s := range c.shapes {
 		on := set != nil && !set.Off && set.Hints[key] != nil
-		was := old != nil && !old.Off && old.Hints[key] != nil && (set == nil || set.Hints[key] == nil || old.Hints[key].SQL == set.Hints[key].SQL)
+		was := old != nil && !old.Off && old.Hints[key] != nil && (set == nil || set.Hints[key] == nil || old.Hints[key].same(set.Hints[key]))
 		if on && !was {
 			s.BeforeP50Ms = s.recent.median()
 			s.HintedCalls, s.HoldoutCalls = 0, 0
@@ -282,13 +305,16 @@ type Stats struct {
 	Statements int64 `json:"statements"`
 	Dropped    int64 `json:"dropped"`
 	Shapes     int   `json:"shapes"`
+	// NoHintPlan counts calls that would have had a join hint, in a
+	// session where pg_hint_plan wasn't loaded.
+	NoHintPlan int64 `json:"no_pg_hint_plan,omitempty"`
 }
 
 // Stats reports how much the collector has seen and dropped.
 func (c *Collector) Stats() Stats {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return Stats{Statements: c.seen.Load(), Dropped: c.dropped.Load(), Shapes: len(c.shapes)}
+	return Stats{Statements: c.seen.Load(), Dropped: c.dropped.Load(), Shapes: len(c.shapes), NoHintPlan: c.noHintPlan.Load()}
 }
 
 func (c *Collector) loop() {

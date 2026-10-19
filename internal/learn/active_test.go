@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -347,5 +348,93 @@ func TestSameAnswersWithHints(t *testing.T) {
 	}
 	if hinted != 4 {
 		t.Errorf("%d calls hinted, want 4", hinted)
+	}
+}
+
+// planProbe shows the plan it gets: a join a pg_hint_plan comment can turn
+// into a merge join.
+const planProbe = "EXPLAIN (COSTS OFF) SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
+
+// A proven row-count hint goes in as a pg_hint_plan comment: in front of a
+// plain query, and into the text of a one-shot prepared statement. A session
+// without pg_hint_plan gets nothing, and its calls aren't counted as hinted.
+func TestJoinHintCommentIsApplied(t *testing.T) {
+	key := ""
+	r := newActiveRig(t, "", func(f *state.File, db string) {
+		key = db + "/" + sqltext.Fingerprint(planProbe)
+		f.Serve[key] = &state.Learned{Key: key, ID: sqltext.Fingerprint(planProbe), Database: db, Status: Proven,
+			Proven: hints.RowCounts, Comment: "MergeJoin(c n)", Arms: map[string]*state.Arm{}}
+	})
+	ctx := context.Background()
+	if v, err := r.direct.QueryValue(ctx, "SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_hint_plan'"); err != nil || v == "0" {
+		t.Skip("pg_hint_plan isn't installed")
+	}
+	cfg := *r.appCfg
+	cfg.Options = "-c session_preload_libraries=pg_hint_plan"
+	hp, err := pgwire.Connect(ctx, &cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hp.Close()
+	top := func(c *pgwire.Conn, extended bool) string {
+		t.Helper()
+		var res []pgwire.Result
+		var err error
+		if extended {
+			res, err = c.ExecOne(ctx, planProbe)
+		} else {
+			res, err = c.Exec(ctx, planProbe)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return *res[0].Rows[0][0]
+	}
+	for _, ext := range []bool{false, true} {
+		if v := top(hp, ext); !strings.Contains(v, "Merge Join") {
+			t.Errorf("extended=%v: the comment wasn't applied: %q", ext, v)
+		}
+	}
+	// Without pg_hint_plan in the session, the comment does nothing, and
+	// LQO notices and stops putting it in. Switched off for the session,
+	// whether or not the server preloads it.
+	off := *r.appCfg
+	off.Options = "-c pg_hint_plan.enable_hint=off"
+	noHP, err := pgwire.Connect(ctx, &off)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer noHP.Close()
+	for i := 0; i < 2; i++ {
+		if v := top(noHP, false); strings.Contains(v, "Merge Join") {
+			t.Errorf("merge join without pg_hint_plan: %q", v)
+		}
+	}
+	r.col.Flush()
+	sh, _ := r.col.Get(key)
+	if sh.HintedCalls != 2 {
+		t.Errorf("hinted calls %d, want the 2 with pg_hint_plan", sh.HintedCalls)
+	}
+	if n := r.col.Stats().NoHintPlan; n != 1 {
+		t.Errorf("calls without pg_hint_plan noticed: %d, want 1 (then it stops trying)", n)
+	}
+	// An error in a hinted statement points into the client's own text.
+	bad := planProbe + " WHERE nonexistent_column = 1"
+	key2 := r.db + "/" + sqltext.Fingerprint(bad)
+	r.l.mu.Lock()
+	r.l.file.Serve[key2] = &state.Learned{Key: key2, ID: sqltext.Fingerprint(bad), Database: r.db, Status: Proven, Proven: hints.RowCounts, Comment: "MergeJoin(c n)", Arms: map[string]*state.Arm{}}
+	r.l.publishLocked()
+	r.l.mu.Unlock()
+	for _, ext := range []bool{false, true} {
+		var err error
+		if ext {
+			_, err = hp.ExecOne(ctx, bad)
+		} else {
+			_, err = hp.Exec(ctx, bad)
+		}
+		var pe *pgwire.PgError
+		if !errors.As(err, &pe) || pe.Position != strconv.Itoa(strings.Index(bad, "nonexistent_column")+1) {
+			t.Errorf("extended=%v: error position %+v for %q", ext, pe, bad)
+		}
 	}
 }

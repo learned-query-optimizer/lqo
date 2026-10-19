@@ -19,11 +19,29 @@ type Setting struct {
 }
 
 // Arm is one combination of settings to try against the server's default
-// plan.
+// plan. An arm built for one shape from what its runs measured may instead
+// carry Comment: pg_hint_plan hints, such as "Rows(c o *8300)", that go in a
+// /*+ ... */ comment at the start of the query.
 type Arm struct {
 	Name     string
 	Settings []Setting
+	Comment  string
 }
+
+// HintComment is the arm's pg_hint_plan comment, with a space after it, or
+// nothing.
+func (a Arm) HintComment() string {
+	if a.Comment == "" {
+		return ""
+	}
+	return "/*+ " + a.Comment + " */ "
+}
+
+// Arm names for the hints LQO builds from measured row counts.
+const (
+	RowCounts      = "row counts"
+	RowCountsTwice = "row counts, second pass"
+)
 
 // SetLocal is the arm as SET LOCAL statements, one per line.
 func (a Arm) SetLocal() []string {
@@ -56,19 +74,19 @@ func off(names ...string) []Setting {
 // together, plus one that keeps the join order as written.
 func Standard() []Arm {
 	return []Arm{
-		{"no nested loop", off("enable_nestloop")},
-		{"no hash join", off("enable_hashjoin")},
-		{"no merge join", off("enable_mergejoin")},
-		{"hash join only", off("enable_nestloop", "enable_mergejoin")},
-		{"nested loop only", off("enable_hashjoin", "enable_mergejoin")},
-		{"merge join only", off("enable_nestloop", "enable_hashjoin")},
-		{"no sequential scan", off("enable_seqscan")},
-		{"no index scan", off("enable_indexscan", "enable_indexonlyscan")},
-		{"no bitmap scan", off("enable_bitmapscan")},
-		{"no nested loop, no sequential scan", off("enable_nestloop", "enable_seqscan")},
-		{"no memoize", off("enable_memoize")},
-		{"no parallel workers", []Setting{{"max_parallel_workers_per_gather", "0"}}},
-		{"join order as written", []Setting{{"join_collapse_limit", "1"}, {"from_collapse_limit", "1"}}},
+		{Name: "no nested loop", Settings: off("enable_nestloop")},
+		{Name: "no hash join", Settings: off("enable_hashjoin")},
+		{Name: "no merge join", Settings: off("enable_mergejoin")},
+		{Name: "hash join only", Settings: off("enable_nestloop", "enable_mergejoin")},
+		{Name: "nested loop only", Settings: off("enable_hashjoin", "enable_mergejoin")},
+		{Name: "merge join only", Settings: off("enable_nestloop", "enable_hashjoin")},
+		{Name: "no sequential scan", Settings: off("enable_seqscan")},
+		{Name: "no index scan", Settings: off("enable_indexscan", "enable_indexonlyscan")},
+		{Name: "no bitmap scan", Settings: off("enable_bitmapscan")},
+		{Name: "no nested loop, no sequential scan", Settings: off("enable_nestloop", "enable_seqscan")},
+		{Name: "no memoize", Settings: off("enable_memoize")},
+		{Name: "no parallel workers", Settings: []Setting{{"max_parallel_workers_per_gather", "0"}}},
+		{Name: "join order as written", Settings: []Setting{{"join_collapse_limit", "1"}, {"from_collapse_limit", "1"}}},
 	}
 }
 

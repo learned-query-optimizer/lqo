@@ -140,6 +140,39 @@ the first one rules out every hint for the shape, and isn't counted in its times
 Hints that ran exactly the same plans as the winner are listed in the JSON report
 as `same_plan_as`.
 
+### Row-count hints
+
+With `--join-hints auto` (the default) or `on`, LQO checks at the start that
+pg_hint_plan is loaded in its session (`current_setting('pg_hint_plan.enable_hint',
+true)`), and if not, tries `LOAD 'pg_hint_plan'`. It uses the extension only when
+that setting is `on`; the report's `join_hints` says which, and why not. `on` makes
+the run fail without it.
+
+On a shape's first text, after the default plan's warm-up run, LQO walks that
+run's plan. For every Nested Loop, Hash Join or Merge Join whose `Actual Rows` is
+more than 2 times its `Plan Rows`, or less than half, it takes the factor
+(actual over planned, both per process, rounded to two significant figures; a
+join that returned nothing gets 1 over planned) and the aliases of the tables
+under it, and writes `Rows(aliases *factor)`. It leaves out a join:
+
+- on the inner side of a nested loop, or in a subplan or initplan, where the
+  numbers are per outer row;
+- over an Append or Merge Append (partitions);
+- with any alias that isn't a plain lower-case identifier (`[a-z_][a-z0-9_]*`),
+  so nothing in the comment can need quoting or end it.
+
+All of them together are the hint "row counts": the comment `/*+ Rows(...) ... */`
+in front of the `EXPLAIN`. If its plan isn't the default's, LQO runs it, reads that
+run's plan the same way, and when it finds joins not yet corrected, adds them to
+make "row counts, second pass". Both are kept for the shape's later texts
+unchanged, and judged by the rule above like any hint. A row-count hint never
+shares a plan group with a planner switch, even with the same plan shape, because
+a switch's cost penalty can change how the same plan runs (JIT, for one). When it
+ties, it counts as one setting per `Rows` plus one, so a plain switch wins.
+
+In the JSON report the winner's `hint_comment` holds the hints, and `set_local`
+holds the comment line to use.
+
 ## The JSON report
 
 `--report json` writes one object. The main fields:
@@ -336,6 +369,17 @@ of these hold:
   Describe, an Execute and a Sync;
 - the call isn't one of the `--holdout` share chosen at random to run without it.
 
+For a row-count hint, LQO also puts its comment first: in front of everything in
+a simple Query, or, for the extended protocol, into the text of the client's
+Parse, and only when that Parse is of the unnamed statement and is followed, in
+what the client has already sent, by Bind, an optional Describe, Execute and
+Sync. The decision for the call (hint or holdout) is then made at the Parse. A
+named or earlier-parsed statement isn't given a row-count hint. The SELECT LQO
+runs has one more column, whether `pg_hint_plan.enable_hint` is `on` in the
+session; when it isn't, the call isn't counted as hinted and that session gets no
+more comments. Error and notice positions are moved back by the length of what
+LQO put in front, until the next ReadyForQuery.
+
 The settings go in with `SELECT set_config(name, value, true), ...,
 set_config('plan_cache_mode', 'force_custom_plan', true)`, which is `SET LOCAL`:
 
@@ -375,7 +419,7 @@ plain passthrough.
 |---|---|
 | `lqo_version`, `mode`, `started` | the running server; `mode` is `shadow` or `active` |
 | `connections_open`, `connections_total` | client connections |
-| `watch` | `statements` measured, `dropped` measurements, `shapes` |
+| `watch` | `statements` measured, `dropped` measurements, `shapes`, and `no_pg_hint_plan`: calls a row-count hint wasn't applied to because their session had no pg_hint_plan |
 | `learning` | `rounds`, `trials` (plans run besides the default, however many hints gave each), `busy_ms`, `proven`, `applied`, `reverted`, `paused` (why nothing is applied, when nothing is), and `replica_down` with `last_error` while the replica can't be reached; absent without `--replica` |
 | `shapes[]` | each shape as in the state file below, and in active mode `applied`, `hinted_calls`, `hinted_p50_ms`, `holdout_calls`, `holdout_p50_ms`, `before_p50_ms` |
 
@@ -399,6 +443,7 @@ from `lqo advise` in the same file stay:
     "settings": [{"name": "enable_nestloop", "value": "off"}],
     "gain": 0.36,
     "arms": {"no nested loop": {"n": 4, "mean_log_ratio": -0.45, "strict_wins": 3, ...}},
+    "join_hints": [{"name": "row counts", "comment": "Rows(c o *...) Rows(c l o *...)"}],
     "family": "lqo_demo.customers,lqo_demo.order_lines,lqo_demo.orders,lqo_demo.products",
     "head_start": 1,
     "trials": 14, "busy_ms": 61200,

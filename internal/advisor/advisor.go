@@ -44,6 +44,11 @@ type Options struct {
 	AllowPrimary  bool          // run against a primary, not just a standby
 	Session       []hints.Setting
 	Progress      io.Writer
+	// JoinHints is "auto" (the default): when the pg_hint_plan extension is
+	// loaded, or can be, LQO also tries hints built from the row counts the
+	// default plan's runs measured. "off" never does; "on" refuses to run
+	// without it.
+	JoinHints string
 }
 
 // Defaults are the settings lqo advise uses unless told otherwise.
@@ -101,6 +106,13 @@ func (o *Options) fill() error {
 	if o.Progress == nil {
 		o.Progress = io.Discard
 	}
+	switch o.JoinHints {
+	case "":
+		o.JoinHints = "auto"
+	case "auto", "on", "off":
+	default:
+		return fmt.Errorf("unknown --join-hints %q (use auto, on or off)", o.JoinHints)
+	}
 	return nil
 }
 
@@ -129,6 +141,7 @@ type Report struct {
 	Target         string        `json:"target"`
 	Standby        bool          `json:"standby"`
 	HintSet        string        `json:"hint_set"`
+	JoinHints      string        `json:"join_hints,omitempty"`
 	Arms           int           `json:"arms"`
 	DroppedArms    []string      `json:"dropped_arms,omitempty"`
 	Repeat         int           `json:"repeat"`
@@ -165,6 +178,7 @@ type ArmResult struct {
 	Name     string          `json:"name"`
 	Settings []hints.Setting `json:"settings"`
 	Lines    []string        `json:"set_local"`
+	Comment  string          `json:"hint_comment,omitempty"`
 	Ms       float64         `json:"ms"`
 	Gain     float64         `json:"gain"`
 	Change   string          `json:"plan_change"`
@@ -207,7 +221,37 @@ type Advisor struct {
 	// distinct plans besides the default to run. Zero runs them all.
 	timeOrder []int
 	maxTimed  int
+
+	// Join hints: whether pg_hint_plan is there, and the arms built for
+	// the shape at hand from its measured row counts. They follow opt.Arms
+	// in the indexes the rest of the advisor uses.
+	hintPlan bool
+	extra    []hints.Arm
 }
+
+// arm is the arm at index i: one of opt.Arms, or a row-count arm built for
+// the current shape.
+func (a *Advisor) arm(i int) *hints.Arm {
+	if i < len(a.opt.Arms) {
+		return &a.opt.Arms[i]
+	}
+	return &a.extra[i-len(a.opt.Arms)]
+}
+
+func (a *Advisor) armCount() int { return len(a.opt.Arms) + len(a.extra) }
+
+// maxExtra is how many row-count arms one shape can have.
+const maxExtra = 2
+
+// JoinHints reports whether this advisor builds and tries row-count hints.
+func (a *Advisor) JoinHints() bool { return a.hintPlan }
+
+// SetExtra gives Trial the row-count arms already built for a shape; Extra
+// returns them after a Trial, including any it built.
+func (a *Advisor) SetExtra(arms []hints.Arm) { a.extra = append([]hints.Arm(nil), arms...) }
+
+// Extra is the row-count arms for the shape of the last Trial.
+func (a *Advisor) Extra() []hints.Arm { return append([]hints.Arm(nil), a.extra...) }
 
 // New checks the server and prepares a run. It refuses a primary unless
 // AllowPrimary is set.
@@ -288,6 +332,43 @@ func New(ctx context.Context, conn *pgwire.Conn, opt Options, rep *Report) (*Adv
 		conn.Exec(ctx, "SET compute_query_id = on")
 	}
 
+	// pg_hint_plan, for hints planner settings can't express. It's loaded
+	// for the session by shared_preload_libraries or
+	// session_preload_libraries, or here with LOAD, which a superuser can
+	// always do. A refusal just means no join hints.
+	if opt.JoinHints != "off" {
+		on := func() bool {
+			v, err := conn.QueryValue(ctx, "SELECT coalesce(current_setting('pg_hint_plan.enable_hint', true), '')")
+			return err == nil && v != ""
+		}
+		loaded := on()
+		if !loaded {
+			if _, err := conn.Exec(ctx, "LOAD 'pg_hint_plan'"); err == nil {
+				loaded = on()
+			}
+		}
+		if loaded {
+			if v, _ := conn.QueryValue(ctx, "SELECT current_setting('pg_hint_plan.enable_hint')"); v != "on" {
+				loaded = false
+				rep.JoinHints = "off: pg_hint_plan is loaded, but pg_hint_plan.enable_hint is off"
+			}
+		} else {
+			rep.JoinHints = "off: pg_hint_plan isn't installed or can't be loaded"
+		}
+		if loaded {
+			a.hintPlan = true
+			rep.JoinHints = "pg_hint_plan"
+			if v, err := conn.QueryValue(ctx, "SELECT extversion FROM pg_extension WHERE extname = 'pg_hint_plan'"); err == nil && v != "" {
+				rep.JoinHints += " " + v
+			}
+		} else if opt.JoinHints == "on" {
+			return nil, errors.New("--join-hints on needs the pg_hint_plan extension on the server: " + strings.TrimPrefix(rep.JoinHints, "off: "))
+		}
+		if conn.TxStatus() != 'I' {
+			return nil, errors.New("the connection is inside a transaction")
+		}
+	}
+
 	a.snap, err = a.snapshot(ctx)
 	if err != nil {
 		return nil, err
@@ -298,6 +379,9 @@ func New(ctx context.Context, conn *pgwire.Conn, opt Options, rep *Report) (*Adv
 // snapshot reads the session's current value of every setting LQO changes.
 func (a *Advisor) snapshot(ctx context.Context) (map[string]string, error) {
 	names := hints.SettingNames(a.opt.Arms)
+	if a.hintPlan {
+		names = append(names, "pg_hint_plan.enable_hint")
+	}
 	exprs := make([]string, len(names))
 	for i, n := range names {
 		exprs[i] = fmt.Sprintf("current_setting(%s)", quote(n))
@@ -393,6 +477,12 @@ func (a *Advisor) trial(ctx context.Context, sql string, arm *hints.Arm, mode st
 	// A client-side deadline as a backstop to statement_timeout.
 	tctx, cancel := context.WithTimeout(ctx, timeout+10*time.Second)
 	defer cancel()
+	if arm != nil && arm.Comment != "" {
+		// pg_hint_plan reads hints from a comment at the very start of the
+		// query string. The comment is LQO's own text, built only from
+		// plain aliases and numbers.
+		explain = arm.HintComment() + explain
+	}
 	res, err := a.conn.ExecOne(tctx, explain+sql)
 	// Whatever happened, the transaction must still be open: in progress
 	// after success, failed after an error. Idle would mean it ended.
@@ -517,6 +607,7 @@ type planGroup struct {
 	rows     []float64
 	timedOut bool
 	err      string
+	analyzed *plan.Node // the last run's plan, with what it measured
 }
 
 // shape tries one shape on up to Samples of its texts.
@@ -530,7 +621,11 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 			samples = append(samples, s.Text)
 		}
 	}
-	n := len(a.opt.Arms)
+	// Row-count arms are built from the shape's first text and kept for its
+	// others, so the same hint is judged on every text.
+	a.extra = nil
+	defer func() { a.extra = nil }()
+	n := len(a.opt.Arms) + maxExtra
 	// sumBase and sumArm add up medians across samples; ok[i] stays true
 	// while arm i is never slower beyond tolerance, never times out, and
 	// returns the same rows.
@@ -624,7 +719,7 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 			}
 			if !rowsVary && !sameRows(g.rows, base.rows) {
 				ok[i] = false
-				r.Notes = appendOnce(r.Notes, fmt.Sprintf("%q returned a different number of rows; it was ruled out", a.opt.Arms[i].Name))
+				r.Notes = appendOnce(r.Notes, fmt.Sprintf("%q returned a different number of rows; it was ruled out", a.arm(i).Name))
 				continue
 			}
 			if m > bMed*(1+a.opt.Tolerance) {
@@ -673,12 +768,17 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 		}
 		return nil
 	}
-	arm := a.opt.Arms[best]
+	arm := *a.arm(best)
 	r.Verdict = Faster
+	lines := arm.SetLocal()
+	if arm.Comment != "" {
+		lines = append(lines, arm.HintComment()+"-- at the start of the query, with pg_hint_plan")
+	}
 	r.Best = &ArmResult{
 		Name:     arm.Name,
 		Settings: arm.Settings,
-		Lines:    arm.SetLocal(),
+		Lines:    lines,
+		Comment:  arm.Comment,
 		Ms:       sumArm[best],
 		Gain:     1 - sumArm[best]/sumBase,
 		Change:   plan.Change(firstBase, armRoot[best]),
@@ -686,7 +786,7 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 	// Other arms that ran the very same plans on every sample.
 	for i := 0; i < n; i++ {
 		if i != best && ok[i] && math.Abs(sumArm[i]-sumArm[best]) < 1e-9 && strictWin[i] {
-			r.Best.SamePlan = append(r.Best.SamePlan, a.opt.Arms[i].Name)
+			r.Best.SamePlan = append(r.Best.SamePlan, a.arm(i).Name)
 		}
 	}
 	return nil
@@ -736,7 +836,7 @@ func (a *Advisor) Trial(ctx context.Context, text string, want []int, maxTimed i
 		for i := range sr.Arms {
 			for _, g := range groups {
 				for _, ai := range g.arms {
-					if ai >= 0 && a.opt.Arms[ai].Name == sr.Arms[i].Name {
+					if ai >= 0 && a.arm(ai).Name == sr.Arms[i].Name {
 						sr.Arms[i].RowsVary = len(g.rows) > 0 && !allEqual(g.rows)
 					}
 				}
@@ -773,27 +873,44 @@ func (a *Advisor) sampleArms(ctx context.Context, text string, wantQueryID bool,
 	base := &planGroup{fp: plan.Fingerprint(baseExp.Plan), root: baseExp.Plan, arms: []int{-1}}
 	groups := []*planGroup{base}
 	byFP := map[string]*planGroup{base.fp: base}
-	for i := range a.opt.Arms {
-		if want != nil && !want[i] {
-			continue
-		}
-		e, err := a.trial(ctx, text, &a.opt.Arms[i], "plan", planTimeout)
+	// addArm plans the text under arm i and puts it in its plan's group. It
+	// returns the group when the plan is a new one.
+	addArm := func(i int) (*planGroup, error) {
+		e, err := a.trial(ctx, text, a.arm(i), "plan", planTimeout)
 		if err != nil {
 			if ctx.Err() != nil || errors.Is(err, ErrUnsafe) {
-				return sr, nil, err
+				return nil, err
 			}
 			g := &planGroup{fp: "error", arms: []int{i}, err: errText(err)}
 			groups = append(groups, g)
-			continue
+			return nil, nil
 		}
 		fp := plan.Fingerprint(e.Plan)
-		if g, ok := byFP[fp]; ok {
+		key := fp
+		if a.arm(i).Comment != "" && fp != base.fp {
+			// The same plan shape under a planner switch can still run
+			// differently: a switched-off method's cost penalty can, for
+			// one, push the plan over the JIT threshold. A row-count hint
+			// runs as itself.
+			key = fp + "/" + a.arm(i).Name
+		}
+		if g, ok := byFP[key]; ok {
 			g.arms = append(g.arms, i)
-			continue
+			return nil, nil
 		}
 		g := &planGroup{fp: fp, root: e.Plan, arms: []int{i}}
-		byFP[fp] = g
+		byFP[key] = g
 		groups = append(groups, g)
+		return g, nil
+	}
+	for i := 0; i < a.armCount(); i++ {
+		// Row-count arms already built for the shape are always planned.
+		if want != nil && !want[i] && i < len(a.opt.Arms) {
+			continue
+		}
+		if _, err := addArm(i); err != nil {
+			return sr, nil, err
+		}
 	}
 
 	// When only some plans are to be run, keep the default plan, the
@@ -836,6 +953,17 @@ func (a *Advisor) sampleArms(ctx context.Context, text string, wantQueryID bool,
 		sr.Error = base.err
 		return sr, nil, nil
 	}
+	// The first text of a shape: build its row-count arm from what the
+	// default plan's run measured.
+	building := a.hintPlan && len(a.extra) == 0 && base.analyzed != nil
+	if building {
+		if c := plan.Corrections(base.analyzed); len(c) > 0 {
+			a.extra = append(a.extra, hints.Arm{Name: hints.RowCounts, Comment: plan.RowsHint(c)})
+			if _, err := addArm(len(a.opt.Arms)); err != nil {
+				return sr, nil, err
+			}
+		}
+	}
 	base.runs, base.rows = nil, nil
 	limit := time.Duration(float64(time.Millisecond) * warm * a.opt.TimeoutFactor)
 	if limit < a.opt.MinTimeout {
@@ -852,6 +980,33 @@ func (a *Advisor) sampleArms(ctx context.Context, text string, wantQueryID bool,
 			return sr, nil, err
 		}
 		g.runs, g.rows = nil, nil
+	}
+	// The row-count arm's own run measured joins the default plan didn't
+	// have; corrected too, they make a second arm.
+	if building && len(a.extra) == 1 {
+		var g1 *planGroup
+		for _, g := range groups {
+			if containsArm(g.arms, len(a.opt.Arms)) {
+				g1 = g
+			}
+		}
+		if g1 != nil && g1 != base && g1.analyzed != nil && g1.err == "" && !g1.timedOut {
+			first := plan.Corrections(base.analyzed)
+			both := plan.Merge(first, plan.Corrections(g1.analyzed))
+			if len(both) > len(first) {
+				a.extra = append(a.extra, hints.Arm{Name: hints.RowCountsTwice, Comment: plan.RowsHint(both)})
+				ng, err := addArm(len(a.opt.Arms) + 1)
+				if err != nil {
+					return sr, nil, err
+				}
+				if ng != nil {
+					if _, err := a.run(ctx, text, ng, limit); err != nil {
+						return sr, nil, err
+					}
+					ng.runs, ng.rows = nil, nil
+				}
+			}
+		}
 	}
 
 	// Timed rounds. Each round runs every plan once, in a shuffled order
@@ -896,7 +1051,7 @@ func (a *Advisor) sampleArms(ctx context.Context, text string, wantQueryID bool,
 			if ai < 0 {
 				continue
 			}
-			at := ArmTiming{Name: a.opt.Arms[ai].Name, Plan: g.fp, Same: g == base, TimedOut: g.timedOut, Error: g.err}
+			at := ArmTiming{Name: a.arm(ai).Name, Plan: g.fp, Same: g == base, TimedOut: g.timedOut, Error: g.err}
 			if len(g.runs) > 0 && !g.timedOut {
 				at.Runs = g.runs
 				at.Ms = median(g.runs)
@@ -914,7 +1069,7 @@ func (a *Advisor) sampleArms(ctx context.Context, text string, wantQueryID bool,
 func (a *Advisor) run(ctx context.Context, text string, g *planGroup, limit time.Duration) (float64, error) {
 	var arm *hints.Arm
 	if g.arms[0] >= 0 {
-		arm = &a.opt.Arms[g.arms[0]]
+		arm = a.arm(g.arms[0])
 	}
 	e, err := a.trial(ctx, text, arm, "analyze", limit)
 	if err != nil {
@@ -938,6 +1093,7 @@ func (a *Advisor) run(ctx context.Context, text string, g *planGroup, limit time
 		g.err = "the plan changed between planning and running; statistics may have been updated"
 		return 0, nil
 	}
+	g.analyzed = e.Plan
 	t := e.TotalMs()
 	g.runs = append(g.runs, t)
 	g.rows = append(g.rows, e.RootRows())
@@ -1009,7 +1165,15 @@ func (a *Advisor) better(i, j int, sum []float64) bool {
 	if sum[j] < sum[i]*0.98 {
 		return false
 	}
-	ni, nj := len(a.opt.Arms[i].Settings), len(a.opt.Arms[j].Settings)
+	ni, nj := len(a.arm(i).Settings), len(a.arm(j).Settings)
+	// A row-count arm counts as many settings as hints it carries, so a
+	// plain switch wins a tie.
+	if c := a.arm(i).Comment; c != "" {
+		ni = strings.Count(c, "Rows(") + 1
+	}
+	if c := a.arm(j).Comment; c != "" {
+		nj = strings.Count(c, "Rows(") + 1
+	}
 	if ni != nj {
 		return ni < nj
 	}

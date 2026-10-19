@@ -13,8 +13,9 @@
 #
 #   LQO_DSN=postgres://postgres:secret@localhost/imdb sh scripts/job.sh
 #
-# JOB_HINTS picks the hint set (standard, the default, or full) and JOB_OUT the
-# folder under test/results (job by default). JOB_LIMIT, such as 320m, stops
+# JOB_HINTS picks the hint set (standard, the default, or full), JOB_JOIN_HINTS
+# the row-count hints (auto, the default, on or off), and JOB_OUT the folder
+# under test/results (job by default). JOB_LIMIT, such as 320m, stops
 # lqo advise after that long; it then writes the report of what it finished,
 # marked interrupted.
 set -euo pipefail
@@ -68,7 +69,7 @@ rm -f "$out/job.json"
 limit=()
 [ -n "${JOB_LIMIT:-}" ] && limit=(timeout -s INT "$JOB_LIMIT")
 "${limit[@]}" "$work/lqo" advise --dsn "$LQO_DSN" --allow-primary --top 113 --repeat 3 --samples 10 \
-	--hints "$hints" --max-time "${JOB_MAX_TIME:-120s}" --state "$work/state.json" \
+	--hints "$hints" --join-hints "${JOB_JOIN_HINTS:-auto}" --max-time "${JOB_MAX_TIME:-120s}" --state "$work/state.json" \
 	--report json --out "$out/job.json" "$work/job.sql" || [ -s "$out/job.json" ]
 end=$(date +%s)
 "$work/lqo" report --report text "$out/job.json" > "$out/job.txt"
