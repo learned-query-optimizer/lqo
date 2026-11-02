@@ -29,7 +29,24 @@ type statement struct {
 	// decided is set when LQO decided at Parse time, for a hint with a
 	// comment that had to go in the Parse text: the hint, or the holdout.
 	decided *decision
+	// hinted: LQO has applied a hint to a call of this statement. Its
+	// later calls without one still get fresh plans (plainHint).
+	hinted bool
 }
+
+// plainHint sets only plan_cache_mode = force_custom_plan. A hinted call's
+// plan is a custom plan, and PostgreSQL adds its cost to the prepared
+// statement's average either way, so a hint can tilt the statement's later
+// calls towards its generic plan. Calls of a statement LQO has hinted that
+// don't get the hint (held out, or after the hint is switched off or taken
+// back) get this instead, so they're planned as the hinted ones are and no
+// hint's costs can steer them.
+var plainHint = NewHint("fresh plan", nil, "")
+
+// injectName names LQO's own prepared statement and portal in every
+// session, with a part chosen at random when the process starts, so they
+// can't be the names an application uses.
+var injectName = "lqo_" + strconv.FormatUint(rand.Uint64(), 36)
 
 type decision struct {
 	hint    *Hint
@@ -70,9 +87,6 @@ type pending struct {
 	// For pendInject with a hint comment: the call it's for, which loses
 	// its hinted mark if the reply says pg_hint_plan isn't loaded.
 	check *pending
-	// For pendInject that prepares a statement of LQO's: its SQL, so the
-	// session forgets it if the server skipped the Parse (after an error).
-	parseKey string
 }
 
 // session follows one client connection's requests and replies. The proxy
@@ -96,11 +110,9 @@ type session struct {
 	queue     []*pending
 	describes []string // statement names awaiting ParameterDescription
 	lastDone  time.Time
-	lost      bool              // stopped tracking: too much pipelined
-	txStatus  byte              // from the last ReadyForQuery
-	batch     []byte            // the client's messages since the last reply was complete
-	injected  map[string]string // LQO's prepared statements, by SQL
-	nInjected int
+	lost      bool   // stopped tracking: too much pipelined
+	txStatus  byte   // from the last ReadyForQuery
+	batch     []byte // the client's messages since the last reply was complete
 	// restore is the hint whose settings go back before the client's next
 	// Sync: an extended statement hinted inside its transaction.
 	restore *Hint
@@ -204,8 +216,7 @@ func (s *session) FromClient(typ byte, body, ahead []byte) proxy.Action {
 	case 'S':
 		if h := s.restore; h != nil {
 			s.restore = nil
-			before, _ := s.inject(h.Restore, nil, true)
-			act.Before = before
+			act.Before = s.inject(h.Restore, nil)
 		}
 		s.push(&pending{kind: pendSync, sent: now})
 	case 'D':
@@ -374,7 +385,6 @@ func (s *session) hintExtended(p *pending, ahead []byte) proxy.Action {
 		p.stmt.decided = nil
 		if d.holdout {
 			p.holdout = true
-			return proxy.Action{}
 		}
 		h = d.hint
 	} else {
@@ -385,7 +395,10 @@ func (s *session) hintExtended(p *pending, ahead []byte) proxy.Action {
 		}
 	}
 	if h == nil {
-		return proxy.Action{}
+		if !p.holdout && !(p.stmt.hinted && s.c.active.Load() != nil) {
+			return proxy.Action{}
+		}
+		h = plainHint
 	}
 	sql := h.SQL
 	inTx := s.txStatus == 'T'
@@ -401,53 +414,35 @@ func (s *session) hintExtended(p *pending, ahead []byte) proxy.Action {
 	if parsed {
 		pass = []byte("1") // the client's own ParseComplete comes first
 	}
-	before, _ := s.inject(sql, check, inTx, pass...)
-	p.hinted = true
+	before := s.inject(sql, check, pass...)
+	if h != plainHint {
+		p.hinted = true
+		p.stmt.hinted = true
+	}
 	return proxy.Action{Before: before}
 }
 
-// inject runs sql as a statement of LQO's own, prepared once per session,
-// and queues its replies to be taken out. In a transaction its portal is
-// closed after it, since a named portal lasts to the end of the
-// transaction. pass is replies to the client's own messages that come
+// inject runs sql as a statement of LQO's own and queues its replies to be
+// taken out. It closes its statement first and prepares it again each
+// time, so a DEALLOCATE ALL or DISCARD ALL from the client can't leave it
+// pointing at nothing, and closes its portal after it, since a named portal
+// lasts to the end of a transaction. Closing a name that doesn't exist
+// isn't an error. pass is replies to the client's own messages that come
 // first.
-func (s *session) inject(sql string, check *pending, closePortal bool, pass ...byte) ([]byte, *pending) {
-	if s.injected == nil {
-		s.injected = map[string]string{}
-	}
+func (s *session) inject(sql string, check *pending, pass ...byte) []byte {
 	var before []byte
-	expect := []byte("2DC")
-	inj := &pending{kind: pendInject, check: check, pass: pass}
-	name, ok := s.injected[sql]
-	if !ok {
-		s.nInjected++
-		name = "lqo_hint_" + strconv.Itoa(s.nInjected)
-		s.injected[sql] = name
-		before = appendMsg(before, 'P', cstr(name), cstr(sql), []byte{0, 0})
-		expect = []byte("12DC")
-		inj.parseKey = sql
-	}
-	before = appendMsg(before, 'B', cstr("lqo_hint"), cstr(name), []byte{0, 0, 0, 0, 0, 0})
-	before = appendMsg(before, 'E', cstr("lqo_hint"), []byte{0, 0, 0, 0})
-	if closePortal {
-		before = appendMsg(before, 'C', []byte{'P'}, cstr("lqo_hint"))
-		expect = append(expect, '3')
-	}
-	inj.expect = expect
-	s.push(inj)
-	return before, inj
+	before = appendMsg(before, 'C', []byte{'S'}, cstr(injectName))
+	before = appendMsg(before, 'P', cstr(injectName), cstr(sql), []byte{0, 0})
+	before = appendMsg(before, 'B', cstr(injectName), cstr(injectName), []byte{0, 0, 0, 0, 0, 0})
+	before = appendMsg(before, 'E', cstr(injectName), []byte{0, 0, 0, 0})
+	before = appendMsg(before, 'C', []byte{'P'}, cstr(injectName))
+	s.push(&pending{kind: pendInject, check: check, pass: pass, expect: []byte("312DC3")})
+	return before
 }
 
 // dropFront takes the request at the front of the queue off without
-// reporting it. A statement of LQO's whose Parse the server skipped is
-// forgotten, so it's prepared again next time.
-func (s *session) dropFront() {
-	f := s.queue[0]
-	s.queue = s.queue[1:]
-	if f.kind == pendInject && f.parseKey != "" && len(f.expect) > 0 && f.expect[0] == '1' {
-		delete(s.injected, f.parseKey)
-	}
-}
+// reporting it.
+func (s *session) dropFront() { s.queue = s.queue[1:] }
 
 // firstColumn is the name of a RowDescription's first column.
 func firstColumn(body []byte) string {

@@ -387,7 +387,23 @@ set_config('plan_cache_mode', 'force_custom_plan', true)`, which is `SET LOCAL`:
 | Protocol | What LQO sends | What it takes out of the replies |
 |---|---|---|
 | simple | the SELECT and `; ` in front of the client's text, in the same Query, so both run in one implicit transaction | the SELECT's RowDescription, DataRow and CommandComplete |
-| extended | Parse (once per session, as `lqo_hint_N`), Bind to portal `lqo_hint` and Execute of the SELECT, after the client's Parse and before its Bind | the matching ParseComplete, BindComplete, DataRow and CommandComplete |
+| extended | Close of LQO's statement, Parse of the SELECT under that name, Bind to a portal of the same name, Execute, Close of the portal, after the client's Parse and before its Bind | the matching CloseComplete, ParseComplete, BindComplete, DataRow, CommandComplete and CloseComplete |
+
+LQO's statement and portal are named `lqo_` and a part chosen at random when
+`lqo serve` starts, so an application can't be using the name. The statement is
+closed and prepared again on every call (closing a name that doesn't exist isn't
+an error), so `DEALLOCATE ALL` or `DISCARD ALL` from the application, or from a
+pooler such as PgBouncer, can't leave it missing.
+
+A hinted call of a prepared statement is a custom plan, and PostgreSQL adds its
+cost to the statement's average of custom plans either way. A hint that makes
+plans look costly could then move the statement's later calls without the hint to
+its generic plan. So once LQO has hinted a call of a prepared statement, its later
+calls in that session that don't get the hint (held out, or after the hint was
+switched off or taken back) still get `plan_cache_mode = force_custom_plan` alone,
+the same way. Held-out calls of the extended protocol always do, so the guard
+compares custom plans with custom plans. This stops while active mode is paused
+(replica or state file unavailable).
 
 Inside the client's transaction (`T`), the settings must not outlast the
 statement, so there are two statements of LQO's. The first, Save, keeps each
@@ -405,13 +421,15 @@ before the statement, undoes them as well.
 | Protocol, in a transaction | What LQO sends | What it takes out of the replies |
 |---|---|---|
 | simple | Save and `; ` in front of the client's text, and a new line, `;`, a new line and Restore after it, in the same Query | Save's RowDescription, DataRow and CommandComplete; after the client's CommandComplete, a RowDescription whose first column is `lqo_restore`, with its DataRow and CommandComplete |
-| extended | Save as above, then Close of portal `lqo_hint`; before the client's Sync, Restore the same way (its own `lqo_hint_N`) | ParseComplete when it was prepared, BindComplete, DataRow, CommandComplete and CloseComplete, for each |
+| extended | Save, the same way as the SELECT above; before the client's Sync, Restore the same way | the same replies, for each |
 
 If the client's statement fails, the server skips Restore with the rest of the
 batch (or of the Query); the transaction is then aborted, and only `ROLLBACK` or
 `ROLLBACK TO SAVEPOINT` can follow, which undo LQO's settings too. A statement of
-LQO's whose Parse the server skipped after an error is prepared again the next
-time. After a hinted statement in a transaction, the session has the
+LQO's that the server skipped is simply prepared again on the next call. A cancel
+request that arrives while Restore runs, after the client's statement has
+finished, cancels Restore instead and aborts the transaction; without LQO, a
+cancel that late does nothing. After a hinted statement in a transaction, the session has the
 placeholder settings `lqo.saved_<name>`: outside the transaction they read as
 empty.
 

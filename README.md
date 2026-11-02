@@ -604,6 +604,17 @@ JSON report, the state file and the connection settings.
 - **No hints for pipelines.** A statement sent while earlier ones are still in
   flight runs as it came, inside a transaction or not; so does a simple query
   of several statements inside a transaction.
+- **Fresh plans for statements it has hinted.** A prepared statement LQO has
+  hinted in a session keeps getting freshly made plans there, even for calls it
+  doesn't hint, so the hinted plans' costs can't move it onto its generic plan.
+  That costs planning time on each of those calls.
+- **A late cancel can abort a transaction.** A cancel request that arrives just
+  after a hinted statement in a transaction finished, while LQO sets the
+  settings back, aborts that transaction; without LQO it would do nothing.
+- **A row-count comment stays in the unnamed statement.** LQO puts it into the
+  text of the unnamed statement the client parsed. A driver that binds that same
+  unnamed statement again later, without parsing it anew, runs it with the comment
+  again.
 - **One trace of its own in a transaction.** After a hinted statement inside a
   transaction, LQO's placeholder settings (`lqo.saved_enable_nestloop` and the
   like) exist in that session: `current_setting('lqo.saved_enable_nestloop',

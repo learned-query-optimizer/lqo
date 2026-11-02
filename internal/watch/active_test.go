@@ -117,90 +117,123 @@ func rowDesc(names ...string) []byte {
 	return b
 }
 
+// lqoMsgs is what LQO sends to run sql as its own statement.
+func lqoMsgs(sql string) []byte {
+	b := framed('C', []byte("S"+injectName+"\x00"))
+	b = append(b, framed('P', msg(injectName, sql, int16(0)))...)
+	b = append(b, framed('B', msg(injectName, injectName, int16(0), int16(0), int16(0)))...)
+	b = append(b, framed('E', msg(injectName, int32(0)))...)
+	return append(b, framed('C', []byte("P"+injectName+"\x00"))...)
+}
+
+type reply struct {
+	typ  byte
+	drop bool
+}
+
+// lqoReplies are the replies to lqoMsgs, all taken out.
+var lqoReplies = []reply{{'3', true}, {'1', true}, {'2', true}, {'D', true}, {'C', true}, {'3', true}}
+
+func replies(t *testing.T, s proxy.Session, z byte, steps ...[]reply) {
+	t.Helper()
+	i := 0
+	for _, part := range steps {
+		for _, st := range part {
+			body := []byte(nil)
+			if st.typ == 'Z' {
+				body = []byte{z}
+			}
+			if a := s.FromServer(st.typ, body); a.Drop != st.drop {
+				t.Fatalf("reply %d (%c): drop %v, want %v", i, st.typ, a.Drop, st.drop)
+			}
+			i++
+		}
+	}
+}
+
 // In the client's transaction, an extended statement gets Save before its
-// Bind and Restore before its Sync, each with its portal closed; LQO's
-// replies are taken out and the client's are passed on.
+// Bind and Restore before its Sync; LQO's replies are taken out and the
+// client's are passed on.
 func TestHintExtendedInTransaction(t *testing.T) {
 	c := activeCollector(t, 0)
 	s := c.Open(map[string]string{"user": "app", "database": "shop"})
 	s.FromServer('Z', []byte{'T'})
 	h := c.active.Load().Hints["shop/"+c.fingerprint(probe)]
 	ahead := append(framed('E', msg("", int32(0))), framed('S', nil)...)
-	fc(s, 'P', msg("", probe, int16(0)))
-	act := s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
-	if !bytes.Contains(act.Before, []byte(h.Save)) || !bytes.Contains(act.Before, framed('C', []byte("Plqo_hint\x00"))) {
-		t.Fatalf("before the Bind: %q", act.Before)
-	}
-	fc(s, 'E', msg("", int32(0)))
-	act = fc(s, 'S', nil)
-	if !bytes.Contains(act.Before, []byte(h.Restore)) || !bytes.HasSuffix(act.Before, framed('C', []byte("Plqo_hint\x00"))) {
-		t.Fatalf("before the Sync: %q", act.Before)
-	}
-	// Replies: the client's ParseComplete, LQO's 1 2 D C 3, the client's
-	// 2 D C, LQO's 1 2 D C 3, ReadyForQuery.
-	steps := []struct {
-		typ  byte
-		drop bool
-	}{{'1', false}, {'1', true}, {'2', true}, {'D', true}, {'C', true}, {'3', true},
-		{'2', false}, {'D', false}, {'C', false},
-		{'1', true}, {'2', true}, {'D', true}, {'C', true}, {'3', true}, {'Z', false}}
-	for i, st := range steps {
-		body := []byte(nil)
-		if st.typ == 'Z' {
-			body = []byte{'T'}
+	for call := 0; call < 2; call++ {
+		fc(s, 'P', msg("", probe, int16(0)))
+		act := s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
+		if !bytes.Equal(act.Before, lqoMsgs(h.Save)) {
+			t.Fatalf("call %d, before the Bind: %q", call, act.Before)
 		}
-		if a := s.FromServer(st.typ, body); a.Drop != st.drop {
-			t.Fatalf("reply %d (%c): drop %v, want %v", i, st.typ, a.Drop, st.drop)
+		fc(s, 'E', msg("", int32(0)))
+		act = fc(s, 'S', nil)
+		if !bytes.Equal(act.Before, lqoMsgs(h.Restore)) {
+			t.Fatalf("call %d, before the Sync: %q", call, act.Before)
 		}
-	}
-	// The next call reuses both prepared statements: no Parse.
-	fc(s, 'P', msg("", probe, int16(0)))
-	act = s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
-	if bytes.Contains(act.Before, []byte(h.Save)) || act.Before[0] != 'B' {
-		t.Fatalf("prepared again: %q", act.Before)
-	}
-	fc(s, 'E', msg("", int32(0)))
-	act = fc(s, 'S', nil)
-	if act.Before[0] != 'B' {
-		t.Fatalf("Restore prepared again: %q", act.Before)
+		replies(t, s, 'T', []reply{{'1', false}}, lqoReplies, []reply{{'2', false}, {'D', false}, {'C', false}}, lqoReplies, []reply{{'Z', false}})
 	}
 	// The client's statement fails: the server skips the rest up to the
 	// Sync, Restore included.
-	s.FromServer('1', nil)
-	s.FromServer('2', nil)
-	s.FromServer('D', nil)
-	s.FromServer('C', nil)
-	s.FromServer('3', nil)
-	if a := s.FromServer('E', nil); a.Drop {
-		t.Fatal("the client's error was dropped")
-	}
-	if a := s.FromServer('Z', []byte{'E'}); a.Drop {
-		t.Fatal("ReadyForQuery dropped")
-	}
+	fc(s, 'P', msg("", probe, int16(0)))
+	s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
+	fc(s, 'E', msg("", int32(0)))
+	fc(s, 'S', nil)
+	replies(t, s, 'E', []reply{{'1', false}}, lqoReplies, []reply{{'2', false}, {'E', false}, {'Z', false}})
 	if len(s.(*session).queue) != 0 {
 		t.Errorf("queue left: %d", len(s.(*session).queue))
 	}
 }
 
-// A statement of LQO's whose Parse the server skipped, after an error in
-// the client's own Parse, is prepared again next time.
-func TestSkippedParseIsPreparedAgain(t *testing.T) {
-	c := activeCollector(t, 0)
+// A held-out call of a prepared statement, and a call of a statement LQO
+// has hinted once the hint is switched off, are planned fresh as the hinted
+// calls are (plan_cache_mode only), so the hinted plans' costs can't move
+// them to the generic plan. A statement never hinted gets nothing.
+func TestFreshPlansWithoutTheHint(t *testing.T) {
+	c := activeCollector(t, 1) // every call held out
 	s := c.Open(map[string]string{"user": "app", "database": "shop"})
 	ahead := append(framed('E', msg("", int32(0))), framed('S', nil)...)
-	fc(s, 'P', msg("", probe, int16(0)))
-	act := s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
-	if act.Before[0] != 'P' {
-		t.Fatalf("%q", act.Before)
+	fc(s, 'P', msg("st", probe, int16(0)))
+	s.FromServer('1', nil)
+	s.FromServer('Z', []byte{'I'})
+	act := s.FromClient('B', msg("", "st", int16(0), int16(0), int16(0)), ahead)
+	if !bytes.Equal(act.Before, lqoMsgs(plainHint.SQL)) {
+		t.Fatalf("held out: %q", act.Before)
 	}
 	fc(s, 'E', msg("", int32(0)))
 	fc(s, 'S', nil)
-	s.FromServer('E', nil) // the client's Parse failed
+	replies(t, s, 'I', lqoReplies, []reply{{'2', false}, {'D', false}, {'C', false}, {'Z', false}})
+
+	c2 := activeCollector(t, 0)
+	s = c2.Open(map[string]string{"user": "app", "database": "shop"})
+	fc(s, 'P', msg("st", probe, int16(0)))
+	s.FromServer('1', nil)
 	s.FromServer('Z', []byte{'I'})
-	fc(s, 'P', msg("", probe, int16(0)))
-	act = s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
-	if act.Before[0] != 'P' {
-		t.Fatalf("not prepared again: %q", act.Before)
+	call := func() []byte {
+		act := s.FromClient('B', msg("", "st", int16(0), int16(0), int16(0)), ahead)
+		fc(s, 'E', msg("", int32(0)))
+		fc(s, 'S', nil)
+		if act.Before != nil {
+			replies(t, s, 'I', lqoReplies, []reply{{'2', false}, {'D', false}, {'C', false}, {'Z', false}})
+		} else {
+			replies(t, s, 'I', []reply{{'2', false}, {'D', false}, {'C', false}, {'Z', false}})
+		}
+		return act.Before
+	}
+	h := c2.active.Load().Hints["shop/"+c2.fingerprint(probe)]
+	if b := call(); !bytes.Equal(b, lqoMsgs(h.SQL)) {
+		t.Fatalf("hinted: %q", b)
+	}
+	c2.SetActive(&ActiveSet{Hints: c2.active.Load().Hints, Off: true})
+	if b := call(); !bytes.Equal(b, lqoMsgs(plainHint.SQL)) {
+		t.Fatalf("after switching off: %q", b)
+	}
+	// Another statement, never hinted: nothing.
+	fc(s, 'P', msg("other", probe, int16(0)))
+	s.FromServer('1', nil)
+	s.FromServer('Z', []byte{'I'})
+	if act := s.FromClient('B', msg("", "other", int16(0), int16(0), int16(0)), ahead); act.Before != nil {
+		t.Errorf("a statement never hinted: %q", act.Before)
 	}
 }
 
@@ -213,33 +246,18 @@ func TestHintExtendedQuery(t *testing.T) {
 	if act := early.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), nil); act.Before != nil {
 		t.Error("hinted without seeing the rest of the batch")
 	}
-	fc(s, 'P', msg("", probe, int16(0)))
-	act := s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
-	if !bytes.Contains(act.Before, []byte("set_config('enable_nestloop', 'off', true)")) || act.Before[0] != 'P' {
-		t.Fatalf("before: %q", act.Before)
-	}
-	s.FromClient('D', msg("P", ""), ahead[0:0])
-	s.FromClient('E', msg("", int32(0)), nil)
-	s.FromClient('S', nil, nil)
-	// The client's ParseComplete, then LQO's four replies, then the rest.
-	want := []struct {
-		typ  byte
-		drop bool
-	}{{'1', false}, {'1', true}, {'2', true}, {'D', true}, {'C', true}, {'2', false}, {'T', false}, {'D', false}, {'C', false}, {'Z', false}}
-	for _, w := range want {
-		body := []byte(nil)
-		if w.typ == 'Z' {
-			body = []byte{'I'}
+	h := c.active.Load().Hints["shop/"+c.fingerprint(probe)]
+	for call := 0; call < 2; call++ {
+		fc(s, 'P', msg("", probe, int16(0)))
+		act := s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
+		if !bytes.Equal(act.Before, lqoMsgs(h.SQL)) {
+			t.Fatalf("call %d: before: %q", call, act.Before)
 		}
-		if a := s.FromServer(w.typ, body); a.Drop != w.drop {
-			t.Errorf("%c: drop %v, want %v", w.typ, a.Drop, w.drop)
-		}
-	}
-	// Second time: LQO's statement is already prepared, so no Parse.
-	fc(s, 'P', msg("", probe, int16(0)))
-	act = s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
-	if len(act.Before) == 0 || act.Before[0] != 'B' {
-		t.Errorf("second time: %q", act.Before)
+		s.FromClient('D', msg("P", ""), ahead[0:0])
+		s.FromClient('E', msg("", int32(0)), nil)
+		s.FromClient('S', nil, nil)
+		// The client's ParseComplete, then LQO's replies, then the rest.
+		replies(t, s, 'I', []reply{{'1', false}}, lqoReplies, []reply{{'2', false}, {'T', false}, {'D', false}, {'C', false}, {'Z', false}})
 	}
 	c.Flush()
 }
