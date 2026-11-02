@@ -261,6 +261,13 @@ func run(dsn, bin, reportPath, workload, out string, rounds, port int) error {
 				if err := exec1("BEGIN"); err != nil {
 					return err
 				}
+				// lqo serve's count of the shape's hinted calls, before.
+				var before int64
+				if on && qq.Hint != "" {
+					if before, err = hintedCalls(status, qq.Shape); err != nil {
+						return err
+					}
+				}
 				t0 := time.Now()
 				if err := exec1(qq.text); err != nil {
 					return fmt.Errorf("%s: %v", qq.Name, err)
@@ -280,17 +287,15 @@ func run(dsn, bin, reportPath, workload, out string, rounds, port int) error {
 				if on {
 					qq.On = append(qq.On, ms)
 					if qq.Hint != "" {
-						// The switch just before restarted the shape's
-						// count of hinted calls, so this call is its first.
 						n, err := hintedCalls(status, qq.Shape)
 						if err != nil {
 							return err
 						}
-						if n == 1 {
+						if n == before+1 {
 							res.HintedCalls++
 							qq.Hinted++
 						} else {
-							fmt.Fprintf(os.Stderr, "%s: lqo serve counts %d hinted calls, want 1\n", qq.Name, n)
+							fmt.Fprintf(os.Stderr, "%s: lqo serve's count of hinted calls went from %d to %d\n", qq.Name, before, n)
 						}
 					}
 				} else {

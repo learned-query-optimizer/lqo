@@ -316,11 +316,11 @@ On the demo's trap, in the recorded run with pg_hint_plan, "row counts" took the
 two texts from 2,466 ms to 1,635 ms and from 2,363 ms to 1,644 ms, about a third
 less. Switching off nested loops took more than half off, so that's what LQO
 suggested. Row counts matter more where one query needs different join methods
-in different places, as many in the Join Order Benchmark do. In a run of it with
-pg_hint_plan, the switches alone would have sped up 34 of the 94 query shapes,
-one pass from 133.1 s to 78.0 s; with row counts as well, 43 shapes and 69.8 s.
-Row counts won 13 shapes, 9 of them ones no switch passed the rule for
-([test/results/job-join-hints](test/results/job-join-hints)).
+in different places, as many in the Join Order Benchmark do. In the 0.5 run of it
+with pg_hint_plan, the switches alone would have sped up 34 of the 94 query
+shapes, one pass from 133.1 s to 78.0 s; with row counts as well, 43 shapes and
+69.8 s. Row counts won 13 shapes, 9 of them ones no switch passed the rule for
+([test/results/job-join-hints at v0.5.0](https://github.com/learned-query-optimizer/lqo/tree/v0.5.0/test/results/job-join-hints)).
 
 ## Learn from live traffic: lqo serve
 
@@ -674,14 +674,22 @@ any of the hint.
 `sh scripts/record-tests.sh` runs them all and writes the output to
 [test/results/](test/results/). The Join Order Benchmark, 113 queries in 94 shapes
 over the IMDB data set, runs in the [job workflow](.github/workflows/job.yml) on a
-GitHub runner and records its reports in [test/results/job/](test/results/job/). In
-the recorded run (PostgreSQL 16, 4 cores, the 13 standard hints), 35 of the 94
-shapes got a suggestion and 59 stayed on the default plan. The suggestions saved
-21% to 98% per shape, median 48%, and one pass over every tested query went from
-172.6 s to 77.6 s (−55%). One query, JOB 26c, accounts for most of that, 59.2 s to
-1.2 s without parallel workers; without it the pass goes from 113.4 s to 76.4 s
-(−33%). The run used the code released as 0.1.0, built just before the version
-number changed, so its report says `0.1.0-dev`.
+GitHub runner and records its reports in
+[test/results/job-join-hints/](test/results/job-join-hints/). In the latest run
+(2026-11-02, PostgreSQL 16 with pg_hint_plan, 4 cores, the 13 standard hints and
+row counts; the advisor's code is unchanged since 0.5, so the report says 0.5.0),
+46 of the 94 shapes got a suggestion, 14 of them row counts, and 48 stayed on the
+default plan. The suggestions saved 21% to 99% per shape, median 46%, and one pass
+over every tested query went from 129.7 s to 70.6 s (−46%). The first run, with
+the code released as 0.1.0 and without pg_hint_plan, is in
+[test/results/job/](test/results/job/).
+
+The same workflow then replays all 113 queries through `lqo serve --mode active`
+the way an ORM sends them, each inside its own `BEGIN` and `COMMIT` with the
+extended protocol, with the hints that run proved
+([test/results/job-tx/](test/results/job-tx/), `scripts/jobtx`). Each round runs
+every query once with LQO's hints switched off and once on, and the statement
+after each query reads every setting a hint can change.
 
 CI runs every push on Linux against PostgreSQL 14 and 18, and on macOS and Windows.
 Releases are automated: see [RELEASING.md](RELEASING.md).
