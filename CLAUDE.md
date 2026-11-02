@@ -97,6 +97,59 @@ and row-count hints (0.5) (October 2026). Posts about a past release keep that
 release's numbers and link to its tag's results (0.2, 0.3 with the case
 studies, 0.4); the pages and the other posts follow the latest recording. Images are drawn into static/images.
 
+## In progress: 0.6.0 Phase A, hints inside app transactions
+
+Approved by the owner on 2026-11-02 ("Go"), item 5 Phase A of softdev-plan.md
+in photozeitgeist/jollyroger.biz. Phase B (`pg_stat_statements` as a workload
+source) waits for his go.
+
+What and why: active mode applies a hint only to a statement that is its own
+implicit transaction, so it skips everything inside an app's explicit
+transaction, which is most ORM traffic. A SET LOCAL there would last to the
+end of the app's transaction and reach its later statements.
+
+Design decisions:
+- Inside the app's transaction (ReadyForQuery said 'T'), the hint is set for
+  one statement and taken back right after it. Before the statement, one
+  SELECT of LQO's saves each setting it changes (plan_cache_mode included)
+  into a placeholder `lqo.saved_<name>` with set_config(..., true), then sets
+  the hint; after the statement, one SELECT sets each setting back from its
+  placeholder. Everything stays server-side, so no reply has to arrive before
+  LQO can send the restore, and it's SET LOCAL throughout: whatever happens,
+  the transaction's end undoes it too.
+- Same conditions as outside, plus: nothing in flight (so the transaction
+  status is current), the statement is the whole of what the client sent up
+  to its Sync (extended) or the only statement in its Query (simple). A
+  failed transaction ('E') gets nothing.
+- Simple protocol: `<comment><save+set>; <text>\n; <restore>` in one Query;
+  the replies to LQO's two SELECTs are taken out. Extended: the save+set
+  statement goes before the Bind (as now), the restore goes in before the
+  client's Sync.
+- If the client's statement fails, the server skips the restore along with
+  the rest of the batch; the transaction is aborted, and ROLLBACK or ROLLBACK
+  TO SAVEPOINT undoes LQO's settings with the rest (the savepoint is always
+  older than LQO's set). Tested.
+- Pipelined statements (sent while others are in flight) still get no hint;
+  tests check that pipelining through a hinted session stays correct.
+- Known side effect, documented: after a hinted statement in a transaction,
+  `current_setting('lqo.saved_<name>', true)` is '' instead of NULL in that
+  session (a placeholder exists once set).
+- Done when: a JOB replay through an ORM-style transaction wrapper (BEGIN,
+  a statement or two, COMMIT, extended protocol) shows applied hints and the
+  speedup, recorded in test/results.
+- Upkeep: README contents link (#what-03-doesnt-do), headline JOB numbers
+  from the newest run, workflows on stable Go 1.26 (go.mod stays 1.24: the
+  sandbox has only Go 1.24.7).
+
+Steps:
+1. [ ] upkeep: README link, JOB numbers, workflows
+2. [ ] session.go: in-transaction hints with save and restore; unit tests
+3. [ ] real-server tests: simple and extended in a transaction, savepoints,
+       errors and rollback, pipelining, nothing leaks
+4. [ ] JOB replay in transactions (scripts/job.sh, workflow), recorded
+5. [ ] README, docs/REFERENCE.md, independent review, fixes, record-tests.sh
+6. [ ] release 0.6.0; lqo.net post; softdevstudio note; softdev-plan.md
+
 ## Next
 
 Agreed with the owner in October 2026: v0.2.0 (shadow mode) and v0.3.0 (active
