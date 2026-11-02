@@ -116,7 +116,8 @@ Design decisions:
 - The read: the connected database only, top-level statements (1.9+, PG14),
   total_exec_time (total_time before 1.8), the 500 entries with the most total
   time. Kept: what ClassifyTemplate accepts; the rest is counted in the
-  workload line (not reads, hidden by <insufficient privilege>, LQO's own).
+  workload line (not reads, hidden by <insufficient privilege>, LQO's own,
+  statements reading only system catalogs, which drivers and tools send).
   The extension missing gives one clear error (CREATE EXTENSION, preload).
 - Ranking: a shape's calls and time come from pg_stat_statements when it's
   there (complete totals), else from the logs, never summed across both.
@@ -127,10 +128,14 @@ Design decisions:
     about 2000 rows, plain LIMIT for views or when the sample is empty), in a
     READ ONLY transaction that's rolled back, with a statement timeout.
     Parameters on the same table come from the same rows, so the values go
-    together as they do in the data; the most frequent combinations first,
-    up to --samples distinct texts. Range comparisons take quantiles of the
+    together as they do in the data; texts take turns between the most
+    frequent combinations and the rarest in the sample (a rare value fools
+    the planner as often as a common one), up to --samples distinct texts. Range comparisons take quantiles of the
     sample (BETWEEN the 25th and 75th percentile, one-sided the median).
     Arrays get an untyped '{...}' literal.
+  - JSON keys (x->>$1: pg_stat_statements writes keys as parameters too):
+    the keys of the sampled objects, most frequent first, different keys
+    for different parameters on one expression; then the values as above.
   - LIMIT and FETCH get 100, OFFSET 0.
   - Anything else (a parameter in the select list, a function argument
     alone, interval arithmetic): the shape is skipped with the reason.
@@ -145,13 +150,17 @@ Design decisions:
   from the view alone, recorded next to the file run of the same job.
 
 Steps:
-1. [ ] workload: pg_stat_statements reader (version-aware), Group merging
-       stats totals; unit tests
-2. [ ] parameter values: comparison finder, aliases, row sampling,
-       quantiles, LIMIT/OFFSET; unit and real-server tests; CI preloads
-       pg_stat_statements
-3. [ ] CLI `--stats`, `--stats-dsn`; README, docs/REFERENCE.md
-4. [ ] recorded demo run; JOB workflow stats run
+1. [x] workload: pg_stat_statements reader (version-aware), Group merging
+       stats totals; unit tests (internal/stats, internal/workload)
+2. [x] parameter values: comparison finder (sqltext/params.go), aliases,
+       row sampling, quantiles, JSON keys, LIMIT/OFFSET; unit and
+       real-server tests; CI preloads pg_stat_statements (test.yml docker
+       restart, LQO_REQUIRE_STATS; pg-hint-plan job and job.yml)
+3. [x] CLI `--stats`, `--stats-dsn`; README, docs/REFERENCE.md
+4. [ ] recorded demo run (scripts/stats-demo.sh, from record-tests.sh;
+       first local run: the trap gets "no nested loop" from the view as from
+       the file; the platinum trap is too rare for the sample); JOB workflow
+       stats run (job.sh JOB_STATS, scripts/compare)
 5. [ ] independent review, fixes, record-tests.sh
 6. [ ] release 0.7.0; lqo.net post; softdevstudio note; softdev-plan.md
 

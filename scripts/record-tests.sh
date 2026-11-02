@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Runs every test, the race detector, the smoke check, the demo benchmark
+# (from the file, and from pg_stat_statements when it's loaded)
 # and the lqo serve benchmark against a PostgreSQL server, and writes the output to
 # test/results/ with a note of the machine it ran on. Every number on
 # lqo.net and in the README comes from these files.
@@ -50,6 +51,9 @@ wl=$(mktemp -d)/lqo-demo.sql
 "$bin" report --report text "$out/demo/report.json" > "$out/demo/report.txt"
 "$bin" report --report markdown "$out/demo/report.json" > "$out/demo/report.md"
 header "Demo benchmark: lqo advise on the demo workload" "lqo advise --allow-primary lqo-demo.sql" > "$out/demo/environment.txt"
+
+# The same demo, with the workload read from pg_stat_statements.
+sh scripts/stats-demo.sh "$bin" "$wl"
 
 # lqo serve: proxy overhead and learning the demo trap from live traffic.
 bash scripts/serve-bench.sh "$bin"

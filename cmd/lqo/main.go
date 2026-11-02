@@ -28,6 +28,7 @@ import (
 	"github.com/learned-query-optimizer/lqo/internal/report"
 	"github.com/learned-query-optimizer/lqo/internal/sqltext"
 	"github.com/learned-query-optimizer/lqo/internal/state"
+	"github.com/learned-query-optimizer/lqo/internal/stats"
 	"github.com/learned-query-optimizer/lqo/internal/workload"
 )
 
@@ -176,19 +177,24 @@ func cmdAdvise(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	reportFmt := fs.String("report", "text", "report format: text, json or markdown")
 	out := fs.String("out", "", "write the report to this file instead of standard output")
 	quiet := fs.Bool("quiet", false, "don't print progress")
+	fromStats := fs.Bool("stats", false, "read the workload from pg_stat_statements on the --dsn server")
+	statsDSN := fs.String("stats-dsn", "", "read pg_stat_statements on this server instead (the primary, when trials run on a standby); implies --stats")
 	var session settingList
 	fs.Var(&session, "set", "session setting for every trial, such as search_path=app (may repeat)")
 	fs.Usage = func() {
-		fmt.Fprint(stderr, "Usage: lqo advise [flags] WORKLOAD...\n\nTries each query shape in the workload under the default plan and under\neach hint, on a standby (or, with --allow-primary, a copy), and reports the\nhints that are clearly and consistently faster. It changes nothing on the\nserver: every trial is an EXPLAIN ANALYZE in a READ ONLY transaction that\nis rolled back.\n\nFlags:\n")
+		fmt.Fprint(stderr, "Usage: lqo advise [flags] WORKLOAD...\n       lqo advise --stats [flags] [WORKLOAD...]\n\nTries each query shape in the workload under the default plan and under\neach hint, on a standby (or, with --allow-primary, a copy), and reports the\nhints that are clearly and consistently faster. It changes nothing on the\nserver: every trial is an EXPLAIN ANALYZE in a READ ONLY transaction that\nis rolled back.\n\nWith --stats, the workload comes from pg_stat_statements: the shapes with the\nmost total time, with values for their parameters taken from rows of the\ntables they're compared with.\n\nFlags:\n")
 		fs.PrintDefaults()
 	}
 	files, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
-	if len(files) == 0 {
+	if *statsDSN != "" {
+		*fromStats = true
+	}
+	if len(files) == 0 && !*fromStats {
 		fs.Usage()
-		return usageError{"give at least one workload file"}
+		return usageError{"give at least one workload file, or --stats"}
 	}
 	switch *reportFmt {
 	case "text", "json", "markdown", "md":
@@ -253,6 +259,14 @@ func cmdAdvise(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if !rep.Standby {
 		fmt.Fprintln(progress, "Note: this is a primary server. Every trial is read-only and rolled back, but the queries still run, several times each.")
 	}
+	if *fromStats {
+		st, name, err := readStats(ctx, conn, *statsDSN, rep.Database, *samples, progress)
+		if err != nil {
+			return err
+		}
+		statements = append(statements, st...)
+		rep.Workload = append(rep.Workload, name)
+	}
 	if !*allDBs {
 		var dropped int
 		statements, dropped = workload.FilterDatabase(statements, rep.Database)
@@ -261,7 +275,7 @@ func cmdAdvise(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	rep.Statements = len(statements)
 	shapes := workload.Group(statements)
 	if len(shapes) == 0 {
-		return fmt.Errorf("no statements found in %s", strings.Join(files, ", "))
+		return fmt.Errorf("no statements found in %s", strings.Join(rep.Workload, ", "))
 	}
 	fmt.Fprintf(progress, "%d statements, %d shapes, %d hints\n", len(statements), len(shapes), rep.Arms)
 
@@ -283,6 +297,45 @@ func cmdAdvise(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return errors.New("interrupted")
 	}
 	return nil
+}
+
+// readStats reads the workload from pg_stat_statements, on the trial server
+// or on the one statsDSN names, and fills in values for its parameters from
+// the trial server's rows.
+func readStats(ctx context.Context, conn *pgwire.Conn, statsDSN, database string, samples int, progress io.Writer) ([]workload.Statement, string, error) {
+	src := conn
+	where := "the --dsn server"
+	if statsDSN != "" {
+		cfg, err := pgwire.ParseConfig(statsDSN)
+		if err != nil {
+			return nil, "", usageError{"--stats-dsn: " + err.Error()}
+		}
+		c, err := pgwire.Connect(ctx, cfg)
+		if err != nil {
+			return nil, "", fmt.Errorf("--stats-dsn: %w", err)
+		}
+		defer c.Close()
+		db, err := c.QueryValue(ctx, "SELECT current_database()")
+		if err != nil {
+			return nil, "", err
+		}
+		if db != database {
+			return nil, "", usageError{fmt.Sprintf("--stats-dsn connects to database %s, but trials run in %s", db, database)}
+		}
+		src = c
+		where = cfg.Describe()
+	}
+	entries, sum, err := stats.Read(ctx, src)
+	if err != nil {
+		return nil, "", err
+	}
+	fmt.Fprintf(progress, "pg_stat_statements: %s; choosing values for their parameters\n", sum)
+	f := &stats.Filler{Conn: conn, Samples: samples}
+	st, err := f.Statements(ctx, entries)
+	if err != nil {
+		return nil, "", err
+	}
+	return st, fmt.Sprintf("pg_stat_statements on %s (%s)", where, sum), nil
 }
 
 func writeReport(path string, rep *advisor.Report, format string, stdout io.Writer) error {

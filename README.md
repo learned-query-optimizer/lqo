@@ -37,7 +37,7 @@ to the live queries, and takes one back if it runs slower live.
 6. [Learn from live traffic: lqo serve](#learn-from-live-traffic-lqo-serve)
 7. [What LQO will and won't run](#what-lqo-will-and-wont-run)
 8. [Commands](#commands)
-9. [What 0.6 doesn't do](#what-06-doesnt-do)
+9. [What 0.7 doesn't do](#what-07-doesnt-do)
 10. [Building and testing](#building-and-testing)
 
 ## Install
@@ -154,8 +154,24 @@ prepared statements (`DETAIL: parameters: $1 = '42'`). With `csvlog` and `jsonlo
 it keeps only statements from the database you connect to, unless you pass
 `--all-databases`.
 
-Statements without their values (pg_stat_statements' `$1`) can't be run, so LQO
-skips them and says why.
+**pg_stat_statements** is the easiest of all on a managed server, where logs can
+be hard to get: if the extension is installed, `lqo advise --stats` reads the
+workload from it, the shapes with the most total time first, with no file at all.
+Run it against a standby and add `--stats-dsn` with the primary's connection
+string, because a standby's view only counts the standby's own queries.
+
+The view keeps `$1` in place of every value, so LQO chooses values itself, on
+the server the trials run on: for a parameter compared with a column or an
+expression over one table (`c.region = $1`, `o.created < $2`,
+`c.attrs->>'tier' = $3`, `IN (...)`, `= ANY($4)`, `BETWEEN`), it samples rows of
+that table in a read-only transaction and takes values from them. Parameters on
+the same table come from the same rows, so the values go together the way they
+do in your data. The texts take turns between the most common combinations and
+the rarest, because a planner is fooled by both. Ranges take quantiles of
+the sample, JSON keys the keys the rows have, `LIMIT` gets 100 and `OFFSET` 0.
+A parameter LQO can't place, like one in the select list or in `now() - $1`,
+makes it skip the shape and say why. Give a log too and its texts come first,
+with their real values.
 
 ### 3. Run it
 
@@ -527,6 +543,7 @@ application's locks.
 
 ```
 lqo advise [flags] WORKLOAD...   try a workload's queries with each hint and report
+lqo advise --stats [flags]       the same, with the workload from pg_stat_statements
 lqo serve [flags]                run as a proxy, measure live queries, learn on a replica
 lqo switch off|on [SHAPE]        turn a running lqo serve's hints off or on
 lqo show [flags]                 print what the state file holds
@@ -543,6 +560,8 @@ lqo version                      print the version
 | `--dsn` | `LQO_DSN`, then `PG*` | connection string |
 | `--allow-primary` | off | run on a primary, not only a standby |
 | `--format` | `auto` | workload format: `auto`, `sql`, `stderr`, `csv`, `json` |
+| `--stats` | off | read the workload from pg_stat_statements on the `--dsn` server |
+| `--stats-dsn` | none | read pg_stat_statements on this server instead (the primary); implies `--stats` |
 | `--hints` | `standard` | `standard` (13 hints) or `full` (48) |
 | `--join-hints` | `auto` | row-count hints with pg_hint_plan: `auto` when it's there, `on` to require it, `off` |
 | `--top` | 25 | how many shapes to test |
@@ -592,7 +611,7 @@ refusal, such as a primary without `--allow-primary`.
 [docs/REFERENCE.md](docs/REFERENCE.md) has the details: workload formats, the
 JSON report, the state file and the connection settings.
 
-## What 0.6 doesn't do
+## What 0.7 doesn't do
 
 - **It changes nothing unless you ask.** `lqo advise` and `lqo serve` in shadow
   mode only report. Only `lqo serve --mode active` applies hints, and only ones
@@ -628,6 +647,12 @@ JSON report, the state file and the connection settings.
   like) exist in that session: `current_setting('lqo.saved_enable_nestloop',
   true)` returns an empty string there instead of NULL. Nothing reads them but
   LQO.
+- **Values from pg_stat_statements are LQO's choice, not your users'.** The
+  view keeps none, so LQO samples them from your rows. A hint proven on common
+  values may not be the one your rarest calls need, and a value rarer than about
+  one row in 2,000 won't turn up in the sample at all (the demo's platinum tier,
+  15 customers in 200,000, doesn't). A log with real values is the better
+  evidence when you have one.
 - **PostgreSQL only**, 14 to 18. Earlier versions may work but aren't tested.
 
 ## Building and testing

@@ -91,6 +91,39 @@ and, from PostgreSQL 14, the query ID (column 26).
 **json.** The server's `jsonlog` (PostgreSQL 15 and later). Same messages, with
 `dbname` and `query_id`.
 
+**pg_stat_statements** (`--stats`, `--stats-dsn`). Not a file: LQO reads the
+view in the database it's connected to, or in the same database on the server
+`--stats-dsn` names (the database names must match). It reads the 500 entries
+with the most total time (`total_exec_time`, `total_time` before extension
+version 1.8), top-level statements only from version 1.9. It keeps the reads it
+may run and counts the rest in the report's workload line: statements that
+aren't reads (and LQO's own), statements that read only the system catalogs
+(what drivers and tools ask), and texts hidden as `<insufficient privilege>`. A
+shape's calls and time come from the view, the whole totals, and aren't added to
+a log's for the same shape.
+
+Values for each `$n`, chosen from the text around it:
+
+| The parameter | Its value |
+|---|---|
+| compared with an expression over one table: `=`, `<>`, `!=`, `LIKE`, `ILIKE`, `IN (...)`, a typed literal such as `date $1` | from rows sampled from that table; parameters on one table from the same rows; the texts take turns between the most frequent combinations and the rarest in the sample; one IN list's parameters from different rows |
+| `<`, `<=`, `>`, `>=` | the median of the sample |
+| `BETWEEN $1 AND $2` | the 25th and 75th percentiles |
+| `= ANY ($1)`, `<> ALL ($1)` | an array of the three most frequent values |
+| a JSON key: `x->$1`, `x->>$1` | the keys of the sampled objects, the most frequent first; two keys on one expression differ |
+| `LIMIT`, `FETCH FIRST` | 100 |
+| `OFFSET` | 0 |
+| anything else | none: the shape is skipped, with the reason |
+
+An unqualified column in a query over several tables belongs to the first table
+where it reads. The sample is about 2,000 rows, with `TABLESAMPLE SYSTEM` on a
+table big enough for it and a plain `LIMIT` otherwise, run in a `READ ONLY`
+transaction with a 10-second statement timeout and rolled back, on the server
+the trials run on. Values are written as untyped string literals, so the type
+they're compared with decides how they're read. Up to `--samples` distinct texts
+per shape; texts from a log of the same shape come first. A shape with chosen
+values says so in its notes.
+
 ## Shapes and fingerprints
 
 A shape's fingerprint is the first 16 hex digits of the SHA-256 of its normalised
@@ -525,6 +558,9 @@ LQO needs to connect, read `pg_settings`, and run `EXPLAIN ANALYZE` on the
 workload's queries, so the role needs `SELECT` on the tables they read. A
 read-only role is enough, and is the better choice: LQO checks the SQL it runs,
 but a role that can't write is a second guard that doesn't depend on that check.
+With `--stats`, the role also needs `pg_read_all_stats` (or to be the role that
+ran the queries) to see the texts of other roles' statements; texts it can't see
+are counted and left out.
 Switching `compute_query_id` on needs a superuser; without one, shapes have no
 query ID and nothing else changes.
 

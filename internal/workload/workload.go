@@ -30,6 +30,16 @@ type Statement struct {
 	Database string  // from the log, when it says
 	LoggedMs float64 // how long the server took, when the log says; -1 if unknown
 	QueryID  string  // the server's query ID, when the log has one
+
+	// From pg_stat_statements: Calls and LoggedMs are the view's totals for
+	// the shape (Totals), or the statement is one more text of a shape whose
+	// totals another statement carries (NoCount). Filled marks a text whose
+	// values LQO chose, and Skip says why a text can't run.
+	Calls   int
+	Totals  bool
+	NoCount bool
+	Filled  bool
+	Skip    string
 }
 
 // Formats the readers understand.
@@ -373,6 +383,8 @@ type Shape struct {
 	QueryIDs   []string
 	Skip       string // why LQO won't run this shape, if it won't
 	Sources    []string
+	Stats      bool // its calls and time come from pg_stat_statements
+	Filled     bool // some of its texts have values LQO chose
 }
 
 // Sample is one distinct text of a shape.
@@ -382,14 +394,19 @@ type Sample struct {
 	MaxMs    float64
 	Source   string
 	Database string
+	Filled   bool   // LQO chose the values
+	Skip     string // why this text can't run, when the reader knows
 }
 
 // Group collects statements into shapes, ordered by total logged time,
-// then by number of calls, then by first appearance.
+// then by number of calls, then by first appearance. A shape found in
+// pg_stat_statements takes its calls and time from there, the whole totals,
+// and not from a log as well.
 func Group(statements []Statement) []*Shape {
 	byID := map[string]*Shape{}
 	var order []*Shape
 	sampleIdx := map[string]map[string]int{}
+	stats := map[string][]Statement{}
 	for _, st := range statements {
 		id := sqltext.Fingerprint(st.Text)
 		sh := byID[id]
@@ -399,37 +416,74 @@ func Group(statements []Statement) []*Shape {
 			order = append(order, sh)
 			sampleIdx[id] = map[string]int{}
 		}
-		sh.Calls++
-		if st.LoggedMs >= 0 {
-			sh.LoggedMs += st.LoggedMs
-			sh.HasTimes = true
+		switch {
+		case st.NoCount:
+		case st.Totals:
+			stats[id] = append(stats[id], st)
+		default:
+			sh.Calls++
+			if st.LoggedMs >= 0 {
+				sh.LoggedMs += st.LoggedMs
+				sh.HasTimes = true
+			}
+		}
+		if st.Filled {
+			sh.Filled = true
 		}
 		if st.QueryID != "" && !contains(sh.QueryIDs, st.QueryID) {
 			sh.QueryIDs = append(sh.QueryIDs, st.QueryID)
 		}
 		key := sqltext.TrimLeadingComments(st.Text)
+		ms := st.LoggedMs
+		calls := 1
+		if st.Totals {
+			calls = max(1, st.Calls)
+			ms = st.LoggedMs / float64(calls)
+		}
+		if st.NoCount {
+			calls, ms = 0, -1
+		}
 		if i, ok := sampleIdx[id][key]; ok {
-			sh.Samples[i].Calls++
-			if st.LoggedMs > sh.Samples[i].MaxMs {
-				sh.Samples[i].MaxMs = st.LoggedMs
+			sh.Samples[i].Calls += calls
+			if ms > sh.Samples[i].MaxMs {
+				sh.Samples[i].MaxMs = ms
+			}
+			if !st.Filled {
+				sh.Samples[i].Filled = false
 			}
 		} else {
 			sampleIdx[id][key] = len(sh.Samples)
-			sh.Samples = append(sh.Samples, Sample{Text: key, Calls: 1, MaxMs: st.LoggedMs, Source: st.Source, Database: st.Database})
+			sh.Samples = append(sh.Samples, Sample{Text: key, Calls: calls, MaxMs: ms, Source: st.Source, Database: st.Database, Filled: st.Filled, Skip: st.Skip})
 			if len(sh.Sources) < 3 {
 				sh.Sources = append(sh.Sources, st.Source)
 			}
 		}
 	}
+	for id, list := range stats {
+		sh := byID[id]
+		sh.Stats, sh.Calls, sh.LoggedMs, sh.HasTimes = true, 0, 0, true
+		for _, st := range list {
+			sh.Calls += st.Calls
+			sh.LoggedMs += st.LoggedMs
+		}
+	}
 	for _, sh := range order {
 		sort.SliceStable(sh.Samples, func(i, j int) bool {
 			a, b := sh.Samples[i], sh.Samples[j]
+			if a.Filled != b.Filled {
+				return !a.Filled // texts from a log come before LQO's
+			}
+			if (a.Skip == "") != (b.Skip == "") {
+				return a.Skip == ""
+			}
 			if a.MaxMs != b.MaxMs {
 				return a.MaxMs > b.MaxMs
 			}
 			return a.Calls > b.Calls
 		})
-		if r := sqltext.Classify(sh.Samples[0].Text); r != "" {
+		if sh.Samples[0].Skip != "" {
+			sh.Skip = sh.Samples[0].Skip
+		} else if r := sqltext.Classify(sh.Samples[0].Text); r != "" {
 			sh.Skip = r
 		}
 	}

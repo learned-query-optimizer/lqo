@@ -52,7 +52,7 @@ func TestHints(t *testing.T) {
 }
 
 func TestAdviseUsageErrors(t *testing.T) {
-	if code, _, _ := runCLI("advise"); code != exitRefused {
+	if code, _, errOut := runCLI("advise"); code != exitRefused || !strings.Contains(errOut, "or --stats") {
 		t.Error("advise without a workload should exit 2")
 	}
 	if code, _, _ := runCLI("advise", "--report", "pdf", "x.sql"); code != exitRefused {
@@ -79,6 +79,35 @@ func TestAdviseUsageErrors(t *testing.T) {
 	if code, _, errOut := runCLI("advise", filepath.Join(t.TempDir(), "missing.sql")); code != exitError || !strings.Contains(errOut, "missing.sql") {
 		t.Errorf("missing file: %d %s", code, errOut)
 	}
+}
+
+// With --stats, the workload comes from pg_stat_statements: no file is
+// needed, and a --stats-dsn database other than the trials' is refused.
+func TestAdviseStats(t *testing.T) {
+	dsn := os.Getenv("LQO_TEST_DSN")
+	if dsn == "" {
+		t.Skip("LQO_TEST_DSN not set")
+	}
+	other := strings.Replace(dsn, "/"+dbName(dsn)+"?", "/template1?", 1)
+	if other == dsn {
+		t.Skip("can't name another database in LQO_TEST_DSN")
+	}
+	code, _, errOut := runCLI("advise", "--dsn", dsn, "--allow-primary", "--stats-dsn", other, "--no-state")
+	if code != exitRefused || !strings.Contains(errOut, "--stats-dsn connects to database template1") {
+		t.Errorf("other database: %d %s", code, errOut)
+	}
+}
+
+// dbName is the database a postgres:// URL names.
+func dbName(dsn string) string {
+	rest := dsn[strings.Index(dsn, "://")+3:]
+	if i := strings.Index(rest, "/"); i >= 0 {
+		rest = rest[i+1:]
+	}
+	if i := strings.Index(rest, "?"); i >= 0 {
+		rest = rest[:i]
+	}
+	return rest
 }
 
 func TestDemoWorkloadOnlyAndShow(t *testing.T) {

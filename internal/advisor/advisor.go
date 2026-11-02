@@ -619,6 +619,9 @@ func (a *Advisor) shape(ctx context.Context, sh *workload.Shape, r *ShapeResult)
 		}
 		if sqltext.Classify(s.Text) == "" {
 			samples = append(samples, s.Text)
+			if s.Filled {
+				r.Notes = appendOnce(r.Notes, "pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with")
+			}
 		}
 	}
 	// Row-count arms are built from the shape's first text and kept for its
