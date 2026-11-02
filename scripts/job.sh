@@ -18,6 +18,11 @@
 # under test/results (job by default). JOB_LIMIT, such as 320m, stops
 # lqo advise after that long; it then writes the report of what it finished,
 # marked interrupted.
+#
+# JOB_TX=1 then replays the queries through lqo serve --mode active inside
+# ORM-style transactions, with the hints lqo advise proved
+# (scripts/jobtx), into test/results/job-tx/. JOB_ADVISE=0 skips lqo advise
+# and takes the hints from the report already in the JOB_OUT folder.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${LQO_DSN:?set LQO_DSN to the database to load IMDB into}"
@@ -62,8 +67,9 @@ for q in $(ls "$work"/job/[0-9]*.sql | sort -V); do
 	echo >> "$work/job.sql"
 done
 
-echo "== lqo advise"
 go build -o "$work/lqo" ./cmd/lqo
+if [ "${JOB_ADVISE:-1}" != 0 ]; then
+echo "== lqo advise"
 start=$(date +%s)
 rm -f "$out/job.json"
 limit=()
@@ -86,3 +92,23 @@ end=$(date +%s)
 	echo "command: lqo advise --allow-primary --top 113 --repeat 3 --samples 10 --hints $hints --max-time ${JOB_MAX_TIME:-120s}${JOB_LIMIT:+, stopped after $JOB_LIMIT}"
 } > "$out/environment.txt"
 echo "results written to $out/"
+fi
+
+if [ "${JOB_TX:-0}" = 1 ]; then
+	echo "== JOB in transactions through lqo serve --mode active"
+	tx=test/results/${JOB_TX_OUT:-job-tx}
+	mkdir -p "$tx"
+	start=$(date +%s)
+	go run ./scripts/jobtx --dsn "$LQO_DSN" --lqo "$work/lqo" --report "$out/job.json" \
+		--workload "$work/job.sql" --out "$tx" --rounds "${JOB_TX_ROUNDS:-3}"
+	end=$(date +%s)
+	{
+		echo "# Join Order Benchmark in transactions through lqo serve"
+		echo "recorded $(date -u '+%Y-%m-%d %H:%M UTC'), took $(( (end - start) / 60 )) minutes"
+		echo "machine: $(uname -sr), $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ //'), $(nproc) CPUs, $(free -g | awk '/Mem:/ {print $2}') GB memory"
+		echo "server: $(psql "$LQO_DSN" -Atc 'SELECT version()')"
+		echo "hints: proven by lqo advise in $out/job.json"
+		echo "command: go run ./scripts/jobtx --rounds ${JOB_TX_ROUNDS:-3}"
+	} > "$tx/environment.txt"
+	echo "results written to $tx/"
+fi

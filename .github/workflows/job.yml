@@ -10,6 +10,11 @@ name: job
 # hand, it can use the full hint set, another runner (a larger one, once set
 # up for the organisation), another results folder, and no join hints.
 #
+# After lqo advise it replays the queries through lqo serve --mode active
+# in ORM-style transactions with the hints advise proved (scripts/jobtx),
+# into test/results/job-tx/. By hand, advise can be skipped (the hints then
+# come from the report already committed).
+#
 # The commit it makes uses the workflow's own token, so it doesn't start the
 # test or release workflows.
 
@@ -18,6 +23,7 @@ on:
     branches: [main]
     paths:
       - scripts/job.sh
+      - scripts/jobtx/**
       - .github/workflows/job.yml
   workflow_dispatch:
     inputs:
@@ -33,6 +39,9 @@ on:
       join_hints:
         description: "row-count hints with pg_hint_plan: auto, on or off"
         default: "on"
+      advise:
+        description: "run lqo advise first (1), or take the hints from the committed report (0)"
+        default: "1"
 
 permissions:
   contents: write
@@ -72,12 +81,14 @@ jobs:
           JOB_OUT: ${{ inputs.out || 'job-join-hints' }}
           JOB_JOIN_HINTS: ${{ inputs.join_hints || 'on' }}
           JOB_LIMIT: 320m
+          JOB_ADVISE: ${{ inputs.advise || '1' }}
+          JOB_TX: "1"
         run: bash scripts/job.sh
       - name: Commit the results
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "test/results/${{ inputs.out || 'job-join-hints' }}"
+          git add "test/results/${{ inputs.out || 'job-join-hints' }}" test/results/job-tx
           if git diff --cached --quiet; then
             echo "Nothing changed."
             exit 0

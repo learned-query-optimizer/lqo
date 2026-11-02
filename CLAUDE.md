@@ -146,7 +146,7 @@ Steps:
 2. [x] session.go: in-transaction hints with save and restore; unit tests
 3. [x] real-server tests: simple and extended in a transaction, savepoints,
        errors and rollback, pipelining, nothing leaks
-4. [ ] JOB replay in transactions (scripts/job.sh, workflow), recorded
+4. [ ] JOB replay in transactions (scripts/jobtx, job.sh JOB_TX, workflow), recorded
 5. [ ] README, docs/REFERENCE.md, independent review, fixes, record-tests.sh
 6. [ ] release 0.6.0; lqo.net post; softdevstudio note; softdev-plan.md
 
