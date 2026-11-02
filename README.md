@@ -704,11 +704,11 @@ only 15 rows in 200,000 have doesn't, because the sample never sees it. The Join
 over the IMDB data set, runs in the [job workflow](.github/workflows/job.yml) on a
 GitHub runner and records its reports in
 [test/results/job-join-hints/](test/results/job-join-hints/). In the latest run
-(2026-11-02, lqo 0.6.0, PostgreSQL 16 with pg_hint_plan, 4 cores, the 13 standard
-hints and row counts), 44 of the 94 shapes got a suggestion, 12 of them row counts,
-and 50 stayed on the default plan. The suggestions saved 22% to 99% per shape,
-median 45%, and one pass over every tested query went from 152.3 s to 62.5 s
-(−59%). The first run, with
+(2026-11-02, lqo 0.7.0, PostgreSQL 16 with pg_hint_plan, 4 cores, the 13 standard
+hints and row counts), 46 of the 94 shapes got a suggestion, 16 of them row counts,
+and 48 stayed on the default plan. The suggestions saved 22% to 99% per shape,
+median 48%, and one pass over every tested query went from 176.0 s to 66.4 s
+(−62%). The first run, with
 the code released as 0.1.0 and without pg_hint_plan, is in
 [test/results/job/](test/results/job/).
 
@@ -718,15 +718,27 @@ extended protocol, with the hints that run proved
 ([test/results/job-tx/](test/results/job-tx/), `scripts/jobtx`). Each round runs
 every query once with LQO's hints switched off and once on, and the statement
 after each query reads every setting a hint can change. In the same run, all 153
-calls of the 44 proven shapes made with hints on were hinted, no statement after
-one saw any of its settings, and a pass over the 113 queries took 152.8 s with
-hints off and 63.7 s on (−58%); the proven shapes alone went from 117.6 s to
-28.9 s (−75%).
+calls of the 46 proven shapes made with hints on were hinted, no statement after
+one saw any of its settings, and a pass over the 113 queries took 180.7 s with
+hints off and 68.5 s on (−62%); the proven shapes alone went from 147.5 s to
+35.3 s (−76%).
 
 With `stats` set, the workflow then runs the 113 queries once with
 pg_stat_statements counting and advises again from the view alone, with no file,
 into [test/results/job-stats/](test/results/job-stats/), with a shape-by-shape
-comparison against the file run on the same data load.
+comparison against the file run on the same data load. In the 2026-11-02 run, LQO
+took 98 of the view's 110 entries (3 weren't reads, 9 read only system
+catalogs) and tested 93
+shapes; 27 got a suggestion (21% to 98%, median 35%), against 46 from the file.
+The two runs gave the same verdict on 47 shapes, 7 of them the same hint. The
+difference is the values: the benchmark's queries use hand-picked, selective
+literals, while LQO fills each `$n` from rows it samples, so its texts are other
+queries over the same shapes (a pass took 16.6 s, against 176.0 s for the
+benchmark's own texts). Timed on the benchmark's texts in the file run, 12 of the
+27 hints proven from the view also saved 20% or more, 7 changed little and 8 were
+slower. A hint proven from pg_stat_statements is proven for the values LQO
+sampled; in active mode, the guard takes back one that runs slower on live
+queries.
 
 CI runs every push on Linux against PostgreSQL 14 and 18, and on macOS and Windows.
 Releases are automated: see [RELEASING.md](RELEASING.md).
