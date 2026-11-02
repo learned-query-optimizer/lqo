@@ -133,8 +133,12 @@ func systemOnly(q string) bool {
 	return true
 }
 
-// own reports a statement LQO itself sends: its checks of settings.
+// own reports a statement LQO itself sends: its samples and its checks of
+// settings.
 func own(q string) bool {
+	if strings.HasPrefix(strings.TrimSpace(q), strings.TrimSpace(Marker)) {
+		return true
+	}
 	n := sqltext.Normalize(q)
 	return strings.Contains(n, "current_setting") && strings.Contains(n, "lqo") ||
 		strings.HasPrefix(n, "select set_config")
@@ -271,7 +275,6 @@ func (f *Filler) Fill(ctx context.Context, query string) ([]string, string, erro
 // the most frequent first. Key parameters on the same expression take
 // different keys, so x->>$1 = $2 AND x->>$3 = $4 reads two keys.
 func (f *Filler) keyVariants(ctx context.Context, query string, uses map[int]sqltext.ParamUse, keys []int, want int) ([]string, string, error) {
-	ranges := sqltext.Aliases(query)
 	type keyGroup struct {
 		ns   []int
 		keys []string
@@ -285,7 +288,7 @@ func (f *Filler) keyVariants(ctx context.Context, query string, uses map[int]sql
 		}
 		g := groups[u.Expr]
 		if g == nil {
-			candidates, why := candidatesFor(u, ranges)
+			candidates, why := candidatesFor(u)
 			if why != "" {
 				return nil, fmt.Sprintf("LQO can't choose a value for $%d: %s", n, why), nil
 			}
@@ -377,7 +380,6 @@ func (f *Filler) fill(ctx context.Context, query string, uses map[int]sqltext.Pa
 		ns = append(ns, n)
 	}
 	sort.Ints(ns)
-	ranges := sqltext.Aliases(query)
 
 	// Group the compared parameters by the FROM item their expression reads.
 	type group struct {
@@ -401,7 +403,7 @@ func (f *Filler) fill(ctx context.Context, query string, uses map[int]sqltext.Pa
 			fixed[n] = OffsetValue
 			continue
 		}
-		candidates, why := candidatesFor(u, ranges)
+		candidates, why := candidatesFor(u)
 		if why != "" {
 			return nil, fmt.Sprintf("LQO can't choose a value for $%d: %s", n, why), nil
 		}
@@ -473,29 +475,22 @@ func (f *Filler) fill(ctx context.Context, query string, uses map[int]sqltext.Pa
 	return out, "", nil
 }
 
-// candidatesFor returns the FROM items an expression may read.
-func candidatesFor(u sqltext.ParamUse, ranges []sqltext.Range) ([]sqltext.Range, string) {
-	var tables []sqltext.Range
-	for _, r := range ranges {
-		if r.Table != "" {
-			tables = append(tables, r)
+// candidatesFor returns the FROM items an expression may read, nearest
+// first, or why there are none.
+func candidatesFor(u sqltext.ParamUse) ([]sqltext.Range, string) {
+	if u.Qualifier != "" {
+		if len(u.Candidates) == 0 {
+			return nil, fmt.Sprintf("LQO can't tell which table %s is", u.Qualifier)
 		}
-	}
-	if u.Qualifier == "" {
-		if len(tables) == 0 {
-			return nil, "it isn't compared with a column of a table"
+		if u.Candidates[0].Table == "" {
+			return nil, fmt.Sprintf("it's compared with a column of %s, which isn't a table", u.Qualifier)
 		}
-		return tables, ""
+		return u.Candidates[:1], ""
 	}
-	for _, r := range ranges {
-		if strings.EqualFold(r.Alias, u.Qualifier) {
-			if r.Table == "" {
-				return nil, fmt.Sprintf("it's compared with a column of %s, which isn't a table", u.Qualifier)
-			}
-			return []sqltext.Range{r}, ""
-		}
+	if len(u.Candidates) == 0 {
+		return nil, "it isn't compared with a column of a table"
 	}
-	return nil, fmt.Sprintf("LQO can't tell which table %s is", u.Qualifier)
+	return u.Candidates, ""
 }
 
 func exprs(uses map[int]sqltext.ParamUse, ns []int) []string {
@@ -672,19 +667,43 @@ func (f *Filler) other(ctx context.Context, r sqltext.Range, u sqltext.ParamUse,
 	return nil, nil
 }
 
+// Marker starts every statement LQO samples with, so that a later read of
+// pg_stat_statements knows them as LQO's own.
+const Marker = "/* lqo sample */ "
+
+// ErrUnsafe stops everything: a sampling statement wasn't one plain
+// statement, or the READ ONLY transaction it ran in was gone after it.
+var ErrUnsafe = errors.New("a sampling statement wasn't safe to run; LQO stopped")
+
 // query runs one statement in a READ ONLY transaction with a statement
 // timeout, rolls it back, and returns its rows as text (NULL as "").
+// The statement is built from pieces of a workload query, so it is checked
+// to be one statement with no comments, and runs through the extended
+// protocol, which refuses more than one statement whatever the text holds.
 func (f *Filler) query(ctx context.Context, q string) ([][]string, error) {
+	for _, t := range sqltext.Lex(q) {
+		if t.Kind == sqltext.Comment || (t.Kind == sqltext.Op && t.Text == ";") {
+			return nil, ErrUnsafe
+		}
+	}
 	timeout := f.Timeout
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	sql := fmt.Sprintf("BEGIN TRANSACTION READ ONLY; SET LOCAL statement_timeout = %d; %s", timeout.Milliseconds(), q)
+	if _, err := f.Conn.Exec(ctx, fmt.Sprintf("BEGIN TRANSACTION READ ONLY; SET LOCAL statement_timeout = %d", timeout.Milliseconds())); err != nil {
+		f.Conn.Exec(ctx, "ROLLBACK")
+		return nil, err
+	}
 	cctx, cancel := context.WithTimeout(ctx, timeout+5*time.Second)
 	defer cancel()
-	res, err := f.Conn.Exec(cctx, sql)
+	res, err := f.Conn.ExecOne(cctx, Marker+q)
+	// Still inside the READ ONLY transaction, or its failed state?
+	still := f.Conn.TxStatus() == 'T' || f.Conn.TxStatus() == 'E'
 	if _, rerr := f.Conn.Exec(ctx, "ROLLBACK"); rerr != nil && err == nil {
 		err = rerr
+	}
+	if !still && !f.Conn.Broken() {
+		return nil, ErrUnsafe
 	}
 	if err != nil {
 		return nil, err

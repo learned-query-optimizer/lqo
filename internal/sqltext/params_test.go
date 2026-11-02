@@ -28,6 +28,23 @@ func TestAliases(t *testing.T) {
 	}
 }
 
+func TestParamCandidates(t *testing.T) {
+	cases := map[string][]Range{
+		// The subquery's own table first, then the outer one.
+		"SELECT * FROM a WHERE a.x IN (SELECT y FROM b WHERE status = $1)": {{"b", "b"}, {"a", "a"}},
+		// An alias used again inside a subquery means the inner table there.
+		"SELECT * FROM a t WHERE EXISTS (SELECT 1 FROM b t WHERE t.status = $1)": {{"b", "t"}},
+		// Outside it, the outer one.
+		"SELECT * FROM a t WHERE t.status = $1 AND EXISTS (SELECT 1 FROM b t)": {{"a", "t"}},
+		"SELECT * FROM app.orders WHERE app.orders.total > $1":                 {{"app.orders", "orders"}},
+	}
+	for q, want := range cases {
+		if got := ParamUses(q)[1].Candidates; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s\n got %+v\nwant %+v", q, got, want)
+		}
+	}
+}
+
 func TestParamUses(t *testing.T) {
 	type u = ParamUse
 	cases := []struct {
@@ -36,11 +53,11 @@ func TestParamUses(t *testing.T) {
 	}{
 		{"SELECT * FROM t WHERE a = $1 AND $2 < t.b", map[int]ParamUse{
 			1: {N: 1, Use: UseEqual, Expr: "a"},
-			2: {N: 2, Use: UseLess, Expr: "t.b", Qualifier: "t"},
+			2: {N: 2, Use: UseLess, Expr: "t . b", Qualifier: "t"},
 		}},
 		{"SELECT * FROM lqo_demo.customers c WHERE c.attrs->>'tier' = $1 AND c.attrs->>'channel' = $2::text", map[int]ParamUse{
-			1: {N: 1, Use: UseEqual, Expr: "c.attrs->>'tier'", Qualifier: "c"},
-			2: {N: 2, Use: UseEqual, Expr: "c.attrs->>'channel'", Qualifier: "c"},
+			1: {N: 1, Use: UseEqual, Expr: "c . attrs ->> 'tier'", Qualifier: "c"},
+			2: {N: 2, Use: UseEqual, Expr: "c . attrs ->> 'channel'", Qualifier: "c"},
 		}},
 		{"SELECT * FROM t WHERE x IN ($1, $2) AND y NOT IN ($3)", map[int]ParamUse{
 			1: {N: 1, Use: UseEqual, Expr: "x", List: 8},
@@ -59,24 +76,28 @@ func TestParamUses(t *testing.T) {
 			3: {N: 3, Use: UseLimit},
 		}},
 		{"SELECT lower(t.name) FROM t WHERE lower(t.name) = $1", map[int]ParamUse{
-			1: {N: 1, Use: UseEqual, Expr: "lower(t.name)", Qualifier: "t"},
+			1: {N: 1, Use: UseEqual, Expr: "lower ( t . name )", Qualifier: "t"},
 		}},
 		{"SELECT $1, a FROM t", map[int]ParamUse{1: {N: 1, Reason: "it isn't compared with a column"}}},
-		{"SELECT * FROM t WHERE created > now() - $1::interval", map[int]ParamUse{1: {N: 1, Reason: "it isn't compared with a column"}}},
+		{"SELECT * FROM t WHERE created > now() - $1::interval", map[int]ParamUse{1: {N: 1, Reason: "it's part of a calculation"}}},
 		{"SELECT * FROM t, u WHERE t.a + u.b = $1", map[int]ParamUse{1: {N: 1, Reason: "it's compared with an expression over more than one table (t, u)"}}},
-		{"SELECT * FROM t WHERE a = (SELECT max(b) FROM u) + $1", map[int]ParamUse{1: {N: 1, Reason: "it isn't compared with a column"}}},
+		{"SELECT * FROM t WHERE a = (SELECT max(b) FROM u) + $1", map[int]ParamUse{1: {N: 1, Reason: "it's part of a calculation"}}},
 		{"SELECT * FROM t WHERE d > date $1 AND e < timestamp with time zone $2", map[int]ParamUse{
 			1: {N: 1, Use: UseLess, Expr: "d"},
 			2: {N: 2, Use: UseLess, Expr: "e"},
 		}},
 		{"SELECT * FROM t c WHERE c.attrs->>$1 = $2", map[int]ParamUse{
-			1: {N: 1, Use: UseKey, Expr: "c.attrs", Qualifier: "c"},
+			1: {N: 1, Use: UseKey, Expr: "c . attrs", Qualifier: "c"},
 			2: {N: 2, Reason: "it's compared with an expression that has another parameter"},
 		}},
 		{"SELECT * FROM t WHERE (a = $1 OR b = $1)", map[int]ParamUse{1: {N: 1, Use: UseEqual, Expr: "a"}}},
 	}
 	for _, c := range cases {
 		got := ParamUses(c.sql)
+		for n, u := range got {
+			u.Candidates = nil
+			got[n] = u
+		}
 		if !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s\n got %+v\nwant %+v", c.sql, got, c.want)
 		}

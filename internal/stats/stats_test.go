@@ -192,7 +192,7 @@ func TestFill(t *testing.T) {
 
 	// What LQO can't fill, it says why, and nothing runs.
 	for q, want := range map[string]string{
-		"SELECT * FROM lqo_stats_test.orders WHERE total > now()::date - $1::date": "isn't compared with a column",
+		"SELECT * FROM lqo_stats_test.orders WHERE total > now()::date - $1::date": "part of a calculation",
 		"SELECT * FROM lqo_stats_test.orders WHERE nosuch = $1":                    "no table here has nosuch",
 		"SELECT * FROM lqo_stats_test.orders o WHERE x.total = $1":                 "can't tell which table x is",
 	} {

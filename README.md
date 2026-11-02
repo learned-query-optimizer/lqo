@@ -169,7 +169,8 @@ the same table come from the same rows, so the values go together the way they
 do in your data. The texts take turns between the most common combinations and
 the rarest, because a planner is fooled by both. Ranges take quantiles of
 the sample, JSON keys the keys the rows have, `LIMIT` gets 100 and `OFFSET` 0.
-A parameter LQO can't place, like one in the select list or in `now() - $1`,
+A parameter LQO can't place, like one in the select list or in a calculation such
+as `now() - $1`,
 makes it skip the shape and say why. Give a log too and its texts come first,
 with their real values.
 

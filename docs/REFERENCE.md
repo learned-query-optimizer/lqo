@@ -115,8 +115,15 @@ Values for each `$n`, chosen from the text around it:
 | `OFFSET` | 0 |
 | anything else | none: the shape is skipped, with the reason |
 
-An unqualified column in a query over several tables belongs to the first table
-where it reads. The sample is about 2,000 rows, with `TABLESAMPLE SYSTEM` on a
+A qualified expression (`c.region`, `app.orders.total`) reads the nearest FROM
+item of that name: in its own query level first, then the levels around it, as
+PostgreSQL resolves it. An unqualified one belongs to the first table of its own
+level where it reads, then of the levels around it. A parameter that's part of a
+calculation (`t.a + $1 = t.b`, `now() - $1`) gets no value: the shape is skipped.
+Every sampling statement starts with the comment `/* lqo sample */`, so a later
+read of the view leaves it out as LQO's own, and runs alone through the extended
+protocol, which can't run a second statement; one with a semicolon or a comment
+of its own is refused, and LQO stops. The sample is about 2,000 rows, with `TABLESAMPLE SYSTEM` on a
 table big enough for it and a plain `LIMIT` otherwise, run in a `READ ONLY`
 transaction with a 10-second statement timeout and rolled back, on the server
 the trials run on. Values are written as untyped string literals, so the type
