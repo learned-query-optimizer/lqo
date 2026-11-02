@@ -134,6 +134,15 @@ Design decisions:
 - Known side effect, documented: after a hinted statement in a transaction,
   `current_setting('lqo.saved_<name>', true)` is '' instead of NULL in that
   session (a placeholder exists once set).
+- Review (independent agent, two rounds): DISCARD ALL / DEALLOCATE ALL left
+  LQO's prepared statement missing (now closed and prepared again on every
+  call, named lqo_ + a random part per process, portal closed too, so an
+  application's lqo_hint cursor can't clash); hinted calls' plan costs
+  tilted a prepared statement's later unhinted calls to the generic plan
+  (now held-out calls, and calls of a statement LQO hinted while hints are
+  live, get force_custom_plan alone, keeping an app's force_generic_plan;
+  pipelined calls are a documented limit). Tests: review_060_test.go,
+  review_060b_test.go, watch/fresh_test.go.
 - Done when: a JOB replay through an ORM-style transaction wrapper (BEGIN,
   a statement or two, COMMIT, extended protocol) shows applied hints and the
   speedup, recorded in test/results.
@@ -142,12 +151,13 @@ Design decisions:
   sandbox has only Go 1.24.7).
 
 Steps:
-1. [ ] upkeep: README link, JOB numbers, workflows
+1. [x] upkeep: README link, workflows (JOB numbers with step 4)
 2. [x] session.go: in-transaction hints with save and restore; unit tests
 3. [x] real-server tests: simple and extended in a transaction, savepoints,
        errors and rollback, pipelining, nothing leaks
 4. [ ] JOB replay in transactions (scripts/jobtx, job.sh JOB_TX, workflow), recorded
-5. [ ] README, docs/REFERENCE.md, independent review, fixes, record-tests.sh
+5. [x] README, docs/REFERENCE.md, independent review (two rounds), fixes
+5b. [ ] record-tests.sh
 6. [ ] release 0.6.0; lqo.net post; softdevstudio note; softdev-plan.md
 
 ## Next

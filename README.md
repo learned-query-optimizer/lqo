@@ -605,8 +605,10 @@ JSON report, the state file and the connection settings.
   flight runs as it came, inside a transaction or not; so does a simple query
   of several statements inside a transaction.
 - **Fresh plans for statements it has hinted.** A prepared statement LQO has
-  hinted in a session keeps getting freshly made plans there, even for calls it
-  doesn't hint, so the hinted plans' costs can't move it onto its generic plan.
+  hinted in a session keeps getting freshly made plans there for the calls it
+  doesn't hint but could have (one whole batch, nothing else in flight), so the
+  hinted plans' costs can't move those onto its generic plan. Calls of it sent in
+  a pipeline get nothing from LQO and can still move.
   That costs planning time on each of those calls. With every hint switched off,
   or while LQO is paused, it sends nothing of its own, so such a statement may
   then move to its generic plan sooner than it would have without LQO.

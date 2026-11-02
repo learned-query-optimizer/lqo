@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"math/rand/v2"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,7 +42,14 @@ type statement struct {
 // don't get the hint (held out, or after the hint is switched off or taken
 // back) get this instead, so they're planned as the hinted ones are and no
 // hint's costs can steer them.
-var plainHint = NewHint("fresh plan", nil, "")
+// It keeps an application's own force_generic_plan.
+var plainHint = func() *Hint {
+	h := NewHint("fresh plan", nil, "")
+	keep := "set_config('plan_cache_mode', CASE current_setting('plan_cache_mode') WHEN 'force_generic_plan' THEN 'force_generic_plan' ELSE 'force_custom_plan' END, true)"
+	h.SQL = strings.Replace(h.SQL, "set_config('plan_cache_mode', 'force_custom_plan', true)", keep, 1)
+	h.Save = strings.Replace(h.Save, "set_config('plan_cache_mode', 'force_custom_plan', true)", keep, 1)
+	return h
+}()
 
 // injectName names LQO's own prepared statement and portal in every
 // session, with a part chosen at random when the process starts, so they

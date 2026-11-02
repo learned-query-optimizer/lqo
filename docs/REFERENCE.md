@@ -401,8 +401,13 @@ plans look costly could then move the statement's later calls without the hint t
 its generic plan. So once LQO has hinted a call of a prepared statement, its later
 calls in that session that don't get the hint (held out, or after the shape was
 switched off or its hint taken back) still get `plan_cache_mode =
-force_custom_plan` alone, the same way. Held-out calls of the extended protocol
-always do, so the guard compares custom plans with custom plans. None of this
+force_custom_plan` alone, the same way (or keep `force_generic_plan` if the
+application set that). Held-out calls of the extended protocol always do, so the
+guard compares custom plans with custom plans. This reaches only calls sent the
+way LQO could hint them, one whole batch with nothing else in flight: the same
+statement run in a pipeline, or with Flush or several Executes before one Sync,
+gets nothing of LQO's and can still move to the generic plan; so can one LQO lost
+track of in a session that prepared more than 5,000 statements. None of this
 happens with every hint switched off or while active mode is paused (replica or
 state file unavailable): LQO then sends nothing of its own, and a statement
 hinted earlier in a session may move to its generic plan sooner than it would
