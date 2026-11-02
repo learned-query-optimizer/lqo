@@ -122,8 +122,10 @@ of its own, and a WITH query's name isn't a table, so a parameter compared with
 a column of one is skipped. An unqualified one belongs to the first table of its own
 level where it reads, then of the levels around it. A parameter that's part of a
 calculation (`t.a + $1 = t.b`, `now() - $1`) gets no value: the shape is skipped.
-Every sampling statement starts with the comment `/* lqo sample */`, so a later
-read of the view leaves it out as LQO's own, and runs alone through the extended
+Every sampling statement starts with `WITH lqo_sample AS (SELECT 1)`, a WITH
+query nothing reads, so a later read of the view leaves it out as LQO's own (a
+comment wouldn't do: PostgreSQL 18 drops the comments in front of a statement
+from the text it keeps), and runs alone through the extended
 protocol, which can't run a second statement; one with a semicolon or a comment
 of its own is refused, and LQO stops. The sample is about 2,000 rows, with `TABLESAMPLE SYSTEM` on a
 table big enough for it and a plain `LIMIT` otherwise, run in a `READ ONLY`

@@ -136,10 +136,10 @@ func systemOnly(q string) bool {
 // own reports a statement LQO itself sends: its samples and its checks of
 // settings.
 func own(q string) bool {
-	if strings.HasPrefix(strings.TrimSpace(q), strings.TrimSpace(Marker)) {
+	n := sqltext.Normalize(q)
+	if strings.HasPrefix(n, "with lqo_sample as") {
 		return true
 	}
-	n := sqltext.Normalize(q)
 	return strings.Contains(n, "current_setting") && strings.Contains(n, "lqo") ||
 		strings.HasPrefix(n, "select set_config")
 }
@@ -668,8 +668,10 @@ func (f *Filler) other(ctx context.Context, r sqltext.Range, u sqltext.ParamUse,
 }
 
 // Marker starts every statement LQO samples with, so that a later read of
-// pg_stat_statements knows them as LQO's own.
-const Marker = "/* lqo sample */ "
+// pg_stat_statements knows them as LQO's own: a WITH query nothing reads,
+// which the planner drops. Not a comment: PostgreSQL 18 leaves the comments
+// before a statement out of the text the view keeps.
+const Marker = "WITH lqo_sample AS (SELECT 1) "
 
 // ErrUnsafe stops everything: a sampling statement wasn't one plain
 // statement, or the READ ONLY transaction it ran in was gone after it.

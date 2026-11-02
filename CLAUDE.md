@@ -167,8 +167,9 @@ Steps:
        "--" comment formed when the expression was written back; round 2: 3,
        set-operation branches, WITH names, calculations in BETWEEN/LIKE), all
        fixed with failing-first tests (review_070*_test.go); sampling
-       statements now run alone through ExecOne, checked by Lex, marked
-       /* lqo sample */. record-tests.sh 2026-11-02: 150 tests passed, 6
+       statements now run alone through ExecOne, checked by Lex, marked with an
+       unread `WITH lqo_sample AS (SELECT 1)` (PG18's view drops leading
+       comments, found by CI). record-tests.sh 2026-11-02: 150 tests passed, 6
        skipped (pg_hint_plan, md5, TLS not set up here; CI has pg_hint_plan)
 6. [ ] release 0.7.0; lqo.net post; softdevstudio note; softdev-plan.md
 
