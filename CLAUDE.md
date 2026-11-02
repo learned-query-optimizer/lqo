@@ -157,7 +157,9 @@ Steps:
        errors and rollback, pipelining, nothing leaks
 4. [ ] JOB replay in transactions (scripts/jobtx, job.sh JOB_TX, workflow), recorded
 5. [x] README, docs/REFERENCE.md, independent review (two rounds), fixes
-5b. [ ] record-tests.sh
+5b. [x] record-tests.sh (2026-11-02: 131 tests passed; this sandbox has no
+       pg_hint_plan, so the demo report ran without row-count hints; CI's
+       pg-hint-plan job covers them)
 6. [ ] release 0.6.0; lqo.net post; softdevstudio note; softdev-plan.md
 
 ## Next

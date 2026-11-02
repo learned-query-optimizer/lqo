@@ -86,18 +86,23 @@ a report like this one, from the recorded run in
 [test/results/demo/report.txt](test/results/demo/report.txt):
 
 ```
-Faster with a hint: 2 of 5 tested
+Faster with a hint: 3 of 5 tested
 
   1. ef02bfce  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_…  (2 calls)
-     2,414 ms → 1,038 ms (−57%) with "no nested loop"
+     2,034 ms → 980 ms (−52%) with "no nested loop"
      Plan: Nested Loop ×3, Bitmap Heap Scan on orders, Index Scan on order_lines, Index Scan on products → Hash Join ×3, Seq Scan on order_lines, Seq Scan on orders, Seq Scan on products
        SET LOCAL enable_nestloop = off;
 
   2. 6c73a7a6  SELECT id, created_at FROM lqo_demo.customers WHERE attrs->>'ti…  (1 call)
-     50.2 ms → 30.1 ms (−40%) with "no index scan"
+     54.0 ms → 31.5 ms (−42%) with "no index scan"
      Plan: Index Scan on customers → Seq Scan on customers
        SET LOCAL enable_indexscan = off;
        SET LOCAL enable_indexonlyscan = off;
+
+  3. b690ee77  SELECT region, count(*) FROM lqo_demo.customers GROUP BY region…  (1 call)
+     30.3 ms → 22.7 ms (−25%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
 ```
 
 Times depend on the machine. On a slower or busier one the margins move, and LQO
@@ -338,20 +343,20 @@ only needs the server's address and TLS settings; `--replica` needs a login, lik
 The status page, on `http://127.0.0.1:6434/` by default, shows what it has seen and
 learned, and `/status` has the same as JSON. `lqo show` reads it from the state
 file afterwards. This is the recorded run on the demo, from
-[test/results/serve/demo.txt](test/results/serve/demo.txt), eight minutes in, when the first hint was proven:
+[test/results/serve/demo.txt](test/results/serve/demo.txt), four minutes in, when the first hint was proven:
 
 ```
-lqo 0.5.0, active mode, up 7m53s
-connections: 0 open, 11 in all
-statements measured: 33 in 2 shapes
-learning: 3 rounds, 10 hint trials, replica busy 2m18s, 1 proven
+lqo 0.6.0, active mode, up 4m19s
+connections: 0 open, 13 in all
+statements measured: 39 in 2 shapes
+learning: 3 rounds, 9 hint trials, replica busy 1m19s, 1 proven
 applying: 1 hint
 
-ef02bfce  lqo_test  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
-  22 calls, 70,301 ms in all, median 2,404 ms, p95 4,808 ms
-  proven: "row counts", about 40% faster on the replica, after 3 rounds
-    /*+ Rows(c o *17000) Rows(c l o *17000) Rows(c l o p *17000) */
-  applied: 0 calls, median 0.00 ms; 2,787 ms before
+ef02bfce  lqotest  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
+  26 calls, 57,458 ms in all, median 2,021 ms, p95 3,400 ms
+  proven: "no nested loop", about 54% faster on the replica, after 3 rounds
+    SET LOCAL enable_nestloop = off;
+  applied: 0 calls, median 0.00 ms; 1,908 ms before
 ```
 
 **How it learns.** Trying all 13 hints on every text would keep the replica busy
@@ -377,15 +382,15 @@ it fails once, the shape goes back to three at a time. Either way a hint is
 proven for the new shape on its own texts, by the same rule, and its own
 results soon outweigh the relatives'. `--share=false` turns it off. In the
 recorded run, three new reports on the same tables as the demo's trap were all
-proven in 214 seconds and 186 seconds of replica time with sharing, against 436
-and 413 seconds without: 12 plan runs instead of 33
+proven in 164 seconds and 142 seconds of replica time with sharing, against 306
+and 282 seconds without: 9 plan runs instead of 27
 ([test/results/serve/shared.txt](test/results/serve/shared.txt)).
 
 **What it costs.** The learner keeps the replica busy at most a quarter of the time
 (`--budget`). The proxy adds time to every query, mostly the extra hop. On the
 two-core test machine, shared by pgbench, PostgreSQL and LQO, a one-row indexed
-SELECT took 0.16 ms straight and 0.47 ms through LQO with prepared statements, and
-0.28 ms against 0.67 ms with plain queries
+SELECT took 0.11 ms straight and 0.35 ms through LQO with prepared statements, and
+0.19 ms against 0.50 ms with plain queries
 ([test/results/serve/overhead.txt](test/results/serve/overhead.txt)). With LQO on
 its own cores, or next to the application, the cost is lower; measure it on yours
 before you rely on it. Measuring never holds traffic up: if LQO falls behind, it drops
@@ -469,21 +474,20 @@ that one statement only.
 The status page shows, per shape, the calls with the hint and without, and their
 medians. In the recorded run on the demo
 ([test/results/serve/demo.txt](test/results/serve/demo.txt)), three minutes after
-the first hint was proven, with a quarter of the calls held out (`--holdout 25`).
-In between, a later check on the replica found plain "no nested loop" faster than
-the first hint, so it took its place, and the live counts started again:
+the first hint was proven, with a quarter of the calls held out (`--holdout 25`):
 
 ```
-ef02bfce  lqo_test  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
-  62 calls, 152,235 ms in all, median 2,404 ms, p95 4,808 ms
-  proven: "no nested loop", about 49% faster on the replica, after 3 rounds
+ef02bfce  lqotest  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
+  74 calls, 116,865 ms in all, median 1,700 ms, p95 3,400 ms
+  proven: "no nested loop", about 59% faster on the replica, after 3 rounds
     SET LOCAL enable_nestloop = off;
-  applied: 7 calls, median 1,054 ms; 5 held out, median 2,318 ms; 2,787 ms before
+  applied: 33 calls, median 814 ms; 15 held out, median 1,868 ms; 1,908 ms before
 ```
 
-Applying a hint costs one more statement in the same round trip. With every one of
-pgbench's SELECTs hinted, the one-row SELECT took 0.65 ms through LQO with prepared
-statements and 0.87 ms with plain queries, against 0.47 ms and 0.67 ms unhinted
+Applying a hint costs one more statement in the same round trip (two inside a
+transaction). With every one of pgbench's SELECTs hinted, the one-row SELECT took
+0.62 ms through LQO with prepared statements and 0.68 ms with plain queries,
+against 0.35 ms and 0.50 ms unhinted
 ([test/results/serve/overhead.txt](test/results/serve/overhead.txt)).
 
 ## What LQO will and won't run

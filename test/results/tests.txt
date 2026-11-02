@@ -1,14 +1,14 @@
 # Every test, verbose, against a real server
-# recorded 2026-10-19 09:34 UTC with go1.24.7 linux/amd64
-# Linux 6.18.44-fc-v139, Intel(R) Xeon(R) Processor @ 2.80GHz, 2 CPUs
+# recorded 2026-11-02 02:30 UTC with go1.24.7 linux/amd64
+# Linux 6.18.44-fc-v185, Intel(R) Xeon(R) Processor @ 2.10GHz, 2 CPUs
 # server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
-# shared_preload_libraries: pg_hint_plan
+# shared_preload_libraries: nothing
 # command: go test -p 1 -count=1 -v ./...
 
 ?   	github.com/learned-query-optimizer/lqo	[no test files]
 === RUN   TestServeSurvivesSIGKILL
-    kill_test.go:103: 10 kills, state whole each time, 3 rounds learned in all
---- PASS: TestServeSurvivesSIGKILL (20.25s)
+    kill_test.go:103: 10 kills, state whole each time, 13 rounds learned in all
+--- PASS: TestServeSurvivesSIGKILL (21.07s)
 === RUN   TestVersionAndHelp
 --- PASS: TestVersionAndHelp (0.00s)
 === RUN   TestHints
@@ -16,7 +16,7 @@
 === RUN   TestAdviseUsageErrors
 --- PASS: TestAdviseUsageErrors (0.00s)
 === RUN   TestDemoWorkloadOnlyAndShow
---- PASS: TestDemoWorkloadOnlyAndShow (0.00s)
+--- PASS: TestDemoWorkloadOnlyAndShow (0.01s)
 === RUN   TestAdviseEndToEnd
 --- PASS: TestAdviseEndToEnd (0.13s)
 === RUN   TestServeUsageErrors
@@ -24,42 +24,42 @@
 === RUN   TestServeMeasuresAndLearns
 --- PASS: TestServeMeasuresAndLearns (1.14s)
 === RUN   TestServeActiveWithSwitchesAndPgbench
---- PASS: TestServeActiveWithSwitchesAndPgbench (5.99s)
+--- PASS: TestServeActiveWithSwitchesAndPgbench (9.62s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/cmd/lqo	27.534s
+ok  	github.com/learned-query-optimizer/lqo/cmd/lqo	31.983s
 === RUN   TestRefusesPrimary
---- PASS: TestRefusesPrimary (0.42s)
+--- PASS: TestRefusesPrimary (0.43s)
 === RUN   TestWritesAreNeverRun
---- PASS: TestWritesAreNeverRun (0.02s)
+--- PASS: TestWritesAreNeverRun (0.01s)
 === RUN   TestTrialsAreReadOnly
---- PASS: TestTrialsAreReadOnly (0.03s)
+--- PASS: TestTrialsAreReadOnly (0.02s)
 === RUN   TestSettingsNeverLeak
---- PASS: TestSettingsNeverLeak (1.07s)
+--- PASS: TestSettingsNeverLeak (0.93s)
 === RUN   TestSlowerHintNeverPromoted
---- PASS: TestSlowerHintNeverPromoted (0.06s)
+--- PASS: TestSlowerHintNeverPromoted (0.07s)
 === RUN   TestDifferentRowsRuleOut
---- PASS: TestDifferentRowsRuleOut (1.33s)
+--- PASS: TestDifferentRowsRuleOut (0.93s)
 === RUN   TestQuotedLockIsSkipped
 --- PASS: TestQuotedLockIsSkipped (0.01s)
 === RUN   TestQueryIDAndSessionSettings
---- PASS: TestQueryIDAndSessionSettings (0.06s)
+--- PASS: TestQueryIDAndSessionSettings (0.05s)
 === RUN   TestInterruptStopsQuickly
 --- PASS: TestInterruptStopsQuickly (0.52s)
 === RUN   TestSyntheticBenchmark
-    advisor_test.go:336: demo built in 6.205s
-    advisor_test.go:359: trap: 4361 ms → 1994 ms per pass of two texts with "no nested loop" (−54%)
+    advisor_test.go:336: demo built in 10.075s
+    advisor_test.go:359: trap: 4074 ms → 1774 ms per pass of two texts with "no nested loop" (−56%)
     advisor_test.go:370: ef02bfce faster    
-    advisor_test.go:370: 24eb83c2 keep      a hint helped one sample but was slower on another
-    advisor_test.go:370: 6c73a7a6 faster    
+    advisor_test.go:370: 24eb83c2 keep      no other plan was clearly faster
+    advisor_test.go:370: 6c73a7a6 keep      no other plan was clearly faster
     advisor_test.go:370: 5fcb12e3 keep      no other plan was clearly faster
     advisor_test.go:370: b690ee77 keep      no other plan was clearly faster
     advisor_test.go:370: 48529e11 skipped   only reads are tested, and this is UPDATE
---- PASS: TestSyntheticBenchmark (152.82s)
+--- PASS: TestSyntheticBenchmark (133.13s)
 === RUN   TestRowCountHints
-    rowcounts_test.go:65: verdict keep: no other plan was clearly faster; best <nil>
---- PASS: TestRowCountHints (4.50s)
+    rowcounts_test.go:33: --join-hints on needs the pg_hint_plan extension on the server: pg_hint_plan isn't installed or can't be loaded
+--- SKIP: TestRowCountHints (0.39s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/advisor	160.834s
+ok  	github.com/learned-query-optimizer/lqo/internal/advisor	136.497s
 ?   	github.com/learned-query-optimizer/lqo/internal/demo	[no test files]
 === RUN   TestStandard
 --- PASS: TestStandard (0.00s)
@@ -70,22 +70,23 @@ ok  	github.com/learned-query-optimizer/lqo/internal/advisor	160.834s
 === RUN   TestSupported
 --- PASS: TestSupported (0.00s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/hints	0.003s
+ok  	github.com/learned-query-optimizer/lqo/internal/hints	0.002s
 === RUN   TestActiveHintIsAppliedAndNeverLeaks
 --- PASS: TestActiveHintIsAppliedAndNeverLeaks (0.02s)
 === RUN   TestErrorPositionThroughTheProxy
---- PASS: TestErrorPositionThroughTheProxy (0.01s)
+--- PASS: TestErrorPositionThroughTheProxy (0.02s)
 === RUN   TestSwitchesActAtOnce
---- PASS: TestSwitchesActAtOnce (0.03s)
+--- PASS: TestSwitchesActAtOnce (0.02s)
 === RUN   TestFailSafe
 --- PASS: TestFailSafe (0.02s)
 === RUN   TestGuardTakesBackASlowerHint
-    active_test.go:291: guard: live median 15.0 ms with "no index scan" against 0.13 ms before the hint
---- PASS: TestGuardTakesBackASlowerHint (1.12s)
+    active_test.go:293: guard: live median 11.8 ms with "no index scan" against 0.14 ms before the hint
+--- PASS: TestGuardTakesBackASlowerHint (0.95s)
 === RUN   TestSameAnswersWithHints
---- PASS: TestSameAnswersWithHints (0.02s)
+--- PASS: TestSameAnswersWithHints (0.03s)
 === RUN   TestJoinHintCommentIsApplied
---- PASS: TestJoinHintCommentIsApplied (0.04s)
+    active_test.go:372: pg_hint_plan isn't installed
+--- SKIP: TestJoinHintCommentIsApplied (0.01s)
 === RUN   TestProvesAClearWinner
 --- PASS: TestProvesAClearWinner (0.00s)
 === RUN   TestNeedsEnoughTexts
@@ -109,23 +110,38 @@ ok  	github.com/learned-query-optimizer/lqo/internal/hints	0.003s
 === RUN   TestUntriedHintsGetTheirTurn
 --- PASS: TestUntriedHintsGetTheirTurn (0.00s)
 === RUN   TestLearnsTheDemoTrapThroughTheProxy
-    learn_test.go:335: trap proven after 3 rounds with "no nested loop, no sequential scan", 50% faster
-    learn_test.go:389: relative proven after 3 rounds and 4 trials with "no nested loop, no sequential scan", 59% faster
---- PASS: TestLearnsTheDemoTrapThroughTheProxy (52.04s)
+    learn_test.go:335: trap proven after 3 rounds with "no nested loop", 75% faster
+    learn_test.go:389: relative proven after 3 rounds and 3 trials with "no nested loop", 76% faster
+--- PASS: TestLearnsTheDemoTrapThroughTheProxy (37.85s)
 === RUN   TestReplicaLossPausesLearningOnly
---- PASS: TestReplicaLossPausesLearningOnly (1.20s)
+--- PASS: TestReplicaLossPausesLearningOnly (1.19s)
 === RUN   TestGainIsOverSummedTimes
 --- PASS: TestGainIsOverSummedTimes (0.00s)
+=== RUN   TestReviewDeallocateAllBreaksHintedCalls
+--- PASS: TestReviewDeallocateAllBreaksHintedCalls (0.02s)
+=== RUN   TestReviewPortalNameCollision
+--- PASS: TestReviewPortalNameCollision (0.01s)
+=== RUN   TestReviewHintedCallsSkewPlanCacheChoice
+--- PASS: TestReviewHintedCallsSkewPlanCacheChoice (0.30s)
+=== RUN   TestReviewSkewThroughPipelinedCalls
+    review_060b_test.go:87: generic plans after the pipeline: 2 (a documented limit)
+--- PASS: TestReviewSkewThroughPipelinedCalls (0.31s)
 === RUN   TestRelativesGiveAHeadStart
 --- PASS: TestRelativesGiveAHeadStart (0.01s)
 === RUN   TestRelativesNeverProve
---- PASS: TestRelativesNeverProve (0.01s)
+--- PASS: TestRelativesNeverProve (0.00s)
 === RUN   TestPriorWeightIsCapped
 --- PASS: TestPriorWeightIsCapped (0.00s)
 === RUN   TestFocusOnARelativesProvenHint
 --- PASS: TestFocusOnARelativesProvenHint (0.00s)
+=== RUN   TestHintInsideTransaction
+--- PASS: TestHintInsideTransaction (0.02s)
+=== RUN   TestHintWithSavepointsAndErrors
+--- PASS: TestHintWithSavepointsAndErrors (0.02s)
+=== RUN   TestPipelineInsideTransaction
+--- PASS: TestPipelineInsideTransaction (0.01s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/learn	54.527s
+ok  	github.com/learned-query-optimizer/lqo/internal/learn	40.834s
 === RUN   TestParseURL
 --- PASS: TestParseURL (0.00s)
 === RUN   TestParseKeywords
@@ -139,15 +155,17 @@ ok  	github.com/learned-query-optimizer/lqo/internal/learn	54.527s
 === RUN   TestCopyIsRefused
 --- PASS: TestCopyIsRefused (0.01s)
 === RUN   TestStatementTimeout
---- PASS: TestStatementTimeout (0.11s)
+--- PASS: TestStatementTimeout (0.10s)
 === RUN   TestContextCancelsTheQuery
 --- PASS: TestContextCancelsTheQuery (0.31s)
 === RUN   TestBadPassword
---- PASS: TestBadPassword (0.00s)
+--- PASS: TestBadPassword (0.01s)
 === RUN   TestMD5Login
---- PASS: TestMD5Login (0.01s)
+    pgwire_test.go:253: LQO_TEST_MD5_DSN not set
+--- SKIP: TestMD5Login (0.00s)
 === RUN   TestVerifiedTLS
---- PASS: TestVerifiedTLS (0.01s)
+    pgwire_test.go:264: LQO_TEST_TLS_DSN not set
+--- SKIP: TestVerifiedTLS (0.00s)
 === RUN   TestConnectRefused
 --- PASS: TestConnectRefused (0.00s)
 === RUN   TestExecOneRunsOneStatement
@@ -155,7 +173,7 @@ ok  	github.com/learned-query-optimizer/lqo/internal/learn	54.527s
 === RUN   TestParseURLSocketHost
 --- PASS: TestParseURLSocketHost (0.00s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/pgwire	0.493s
+ok  	github.com/learned-query-optimizer/lqo/internal/pgwire	0.446s
 === RUN   TestParse
 --- PASS: TestParse (0.00s)
 === RUN   TestParseErrors
@@ -167,23 +185,25 @@ ok  	github.com/learned-query-optimizer/lqo/internal/pgwire	0.493s
 === RUN   TestCorrections
 --- PASS: TestCorrections (0.00s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/plan	0.005s
+ok  	github.com/learned-query-optimizer/lqo/internal/plan	0.004s
 === RUN   TestRelayGivesTheSameResults
---- PASS: TestRelayGivesTheSameResults (0.45s)
+--- PASS: TestRelayGivesTheSameResults (0.34s)
 === RUN   TestTLSOnBothSides
---- PASS: TestTLSOnBothSides (0.02s)
+    proxy_test.go:215: the test server doesn't offer TLS
+--- SKIP: TestTLSOnBothSides (0.01s)
 === RUN   TestNoTLSOffered
---- PASS: TestNoTLSOffered (0.01s)
+--- PASS: TestNoTLSOffered (0.02s)
 === RUN   TestMD5Login
---- PASS: TestMD5Login (0.01s)
+    proxy_test.go:245: LQO_TEST_MD5_DSN not set
+--- SKIP: TestMD5Login (0.00s)
 === RUN   TestWrongPasswordReachesTheClient
---- PASS: TestWrongPasswordReachesTheClient (0.01s)
+--- PASS: TestWrongPasswordReachesTheClient (0.00s)
 === RUN   TestCancelGoesThroughTheProxy
---- PASS: TestCancelGoesThroughTheProxy (0.32s)
+--- PASS: TestCancelGoesThroughTheProxy (0.31s)
 === RUN   TestUpstreamDownGivesAClearError
 --- PASS: TestUpstreamDownGivesAClearError (0.00s)
 === RUN   TestUnixSocket
---- PASS: TestUnixSocket (0.01s)
+--- PASS: TestUnixSocket (0.00s)
 === RUN   TestShutdownWaitsThenCloses
 --- PASS: TestShutdownWaitsThenCloses (0.21s)
 === RUN   TestSCRAMChannelBindingRules
@@ -191,15 +211,16 @@ ok  	github.com/learned-query-optimizer/lqo/internal/plan	0.005s
 === RUN   TestPsqlCopyAndTransactions
 --- PASS: TestPsqlCopyAndTransactions (0.11s)
 === RUN   TestNotificationsPassThrough
---- PASS: TestNotificationsPassThrough (0.05s)
+--- PASS: TestNotificationsPassThrough (0.07s)
 === RUN   TestPsqlOverTLSNeedsChannelBindingOff
+    proxy_test.go:461: psql connected: 1
 --- PASS: TestPsqlOverTLSNeedsChannelBindingOff (0.10s)
 === RUN   TestPgbenchPipelineAndPrepared
---- PASS: TestPgbenchPipelineAndPrepared (0.36s)
+--- PASS: TestPgbenchPipelineAndPrepared (0.23s)
 === RUN   TestWatcherSeesTheTraffic
---- PASS: TestWatcherSeesTheTraffic (0.02s)
+--- PASS: TestWatcherSeesTheTraffic (0.01s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/proxy	1.669s
+ok  	github.com/learned-query-optimizer/lqo/internal/proxy	1.429s
 === RUN   TestTotals
 --- PASS: TestTotals (0.00s)
 === RUN   TestText
@@ -211,7 +232,7 @@ ok  	github.com/learned-query-optimizer/lqo/internal/proxy	1.669s
 === RUN   TestPrimaryLineAndInterrupt
 --- PASS: TestPrimaryLineAndInterrupt (0.00s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/report	0.007s
+ok  	github.com/learned-query-optimizer/lqo/internal/report	0.004s
 === RUN   TestLexKeepsEveryByte
 --- PASS: TestLexKeepsEveryByte (0.00s)
 === RUN   TestLexKinds
@@ -233,20 +254,24 @@ ok  	github.com/learned-query-optimizer/lqo/internal/report	0.007s
 === RUN   TestTables
 --- PASS: TestTables (0.00s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/sqltext	0.002s
+ok  	github.com/learned-query-optimizer/lqo/internal/sqltext	0.003s
 === RUN   TestMissingFileIsEmpty
---- PASS: TestMissingFileIsEmpty (0.00s)
+--- PASS: TestMissingFileIsEmpty (0.02s)
 === RUN   TestSaveLoadAndPut
---- PASS: TestSaveLoadAndPut (0.02s)
+--- PASS: TestSaveLoadAndPut (0.00s)
 === RUN   TestDamagedFileIsSetAside
 --- PASS: TestDamagedFileIsSetAside (0.00s)
 === RUN   TestKilledWhileSaving
-    state_test.go:123: 40 kills, file whole each time; 14 temporary files left by killed writers
---- PASS: TestKilledWhileSaving (3.15s)
+    state_test.go:123: 40 kills, file whole each time; 8 temporary files left by killed writers
+--- PASS: TestKilledWhileSaving (3.14s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/state	3.172s
+ok  	github.com/learned-query-optimizer/lqo/internal/state	3.161s
 === RUN   TestHintSimpleQuery
 --- PASS: TestHintSimpleQuery (0.00s)
+=== RUN   TestHintExtendedInTransaction
+--- PASS: TestHintExtendedInTransaction (0.00s)
+=== RUN   TestFreshPlansWithoutTheHint
+--- PASS: TestFreshPlansWithoutTheHint (0.00s)
 === RUN   TestHintExtendedQuery
 --- PASS: TestHintExtendedQuery (0.00s)
 === RUN   TestHintNotWithMoreInTheBatch
@@ -254,9 +279,11 @@ ok  	github.com/learned-query-optimizer/lqo/internal/state	3.172s
 === RUN   TestErrorPositionIsFixed
 --- PASS: TestErrorPositionIsFixed (0.00s)
 === RUN   TestHoldoutLeavesSomeCallsAlone
---- PASS: TestHoldoutLeavesSomeCallsAlone (0.01s)
+--- PASS: TestHoldoutLeavesSomeCallsAlone (0.00s)
 === RUN   TestOffMeansNoHints
 --- PASS: TestOffMeansNoHints (0.00s)
+=== RUN   TestFreshPlanSQLOnTheServer
+--- PASS: TestFreshPlanSQLOnTheServer (0.01s)
 === RUN   TestLiterals
 --- PASS: TestLiterals (0.00s)
 === RUN   TestSessionFollowsExtendedProtocol
@@ -272,7 +299,7 @@ ok  	github.com/learned-query-optimizer/lqo/internal/state	3.172s
 === RUN   TestQuantiles
 --- PASS: TestQuantiles (0.00s)
 === RUN   TestThroughTheProxy
---- PASS: TestThroughTheProxy (0.11s)
+--- PASS: TestThroughTheProxy (0.08s)
 === RUN   FuzzSession
 === RUN   FuzzSession/seed#0
 === RUN   FuzzSession/seed#1
@@ -280,7 +307,7 @@ ok  	github.com/learned-query-optimizer/lqo/internal/state	3.172s
     --- PASS: FuzzSession/seed#0 (0.00s)
     --- PASS: FuzzSession/seed#1 (0.00s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/watch	0.201s
+ok  	github.com/learned-query-optimizer/lqo/internal/watch	0.176s
 === RUN   TestReadStderrLog
 --- PASS: TestReadStderrLog (0.00s)
 === RUN   TestReadCSVLog
@@ -298,4 +325,5 @@ ok  	github.com/learned-query-optimizer/lqo/internal/watch	0.201s
 === RUN   TestFilterDatabase
 --- PASS: TestFilterDatabase (0.00s)
 PASS
-ok  	github.com/learned-query-optimizer/lqo/internal/workload	0.007s
+ok  	github.com/learned-query-optimizer/lqo/internal/workload	0.008s
+?   	github.com/learned-query-optimizer/lqo/scripts/jobtx	[no test files]
