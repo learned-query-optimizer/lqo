@@ -109,9 +109,7 @@ func TestReviewShadowedAlias(t *testing.T) {
 func TestReviewOwnSamplingReadBack(t *testing.T) {
 	c := connect(t)
 	ctx := context.Background()
-	if _, err := c.Exec(ctx, "SELECT pg_stat_statements_reset()"); err != nil {
-		skip(t, "pg_stat_statements isn't loaded: %v", err)
-	}
+	ensureStats(t, c)
 	scopeTables(t)
 	if _, err := c.Exec(ctx, "SELECT pg_stat_statements_reset()"); err != nil {
 		t.Fatal(err)

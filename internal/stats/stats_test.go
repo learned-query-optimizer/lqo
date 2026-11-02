@@ -206,17 +206,10 @@ func TestFill(t *testing.T) {
 	}
 }
 
-// skip skips, unless CI says the extension must be there.
-func skip(t *testing.T, format string, args ...any) {
+// ensureStats creates pg_stat_statements in the test database if it isn't
+// there yet, and empties it; it skips (or fails in CI) when it can't.
+func ensureStats(t *testing.T, c *pgwire.Conn) {
 	t.Helper()
-	if os.Getenv("LQO_REQUIRE_STATS") != "" {
-		t.Fatalf(format, args...)
-	}
-	t.Skipf(format, args...)
-}
-
-func TestReadAndGroup(t *testing.T) {
-	c := connect(t)
 	ctx := context.Background()
 	v, err := c.QueryValue(ctx, "SELECT count(*) FROM pg_extension WHERE extname = 'pg_stat_statements'")
 	if err != nil {
@@ -230,6 +223,21 @@ func TestReadAndGroup(t *testing.T) {
 	if _, err := c.Exec(ctx, "SELECT pg_stat_statements_reset()"); err != nil {
 		skip(t, "pg_stat_statements isn't loaded: %v", err)
 	}
+}
+
+// skip skips, unless CI says the extension must be there.
+func skip(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("LQO_REQUIRE_STATS") != "" {
+		t.Fatalf(format, args...)
+	}
+	t.Skipf(format, args...)
+}
+
+func TestReadAndGroup(t *testing.T) {
+	c := connect(t)
+	ctx := context.Background()
+	ensureStats(t, c)
 	setup(t, c)
 	if _, err := c.Exec(ctx, "SELECT pg_stat_statements_reset()"); err != nil {
 		t.Fatal(err)
