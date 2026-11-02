@@ -37,7 +37,7 @@ to the live queries, and takes one back if it runs slower live.
 6. [Learn from live traffic: lqo serve](#learn-from-live-traffic-lqo-serve)
 7. [What LQO will and won't run](#what-lqo-will-and-wont-run)
 8. [Commands](#commands)
-9. [What 0.3 doesn't do](#what-03-doesnt-do)
+9. [What 0.6 doesn't do](#what-06-doesnt-do)
 10. [Building and testing](#building-and-testing)
 
 ## Install
@@ -416,22 +416,33 @@ lqo serve --mode active --dsn "postgres://db1:5432/shop?sslmode=require" \
 ```
 
 In active mode, LQO applies each proven hint to the live calls of its shape. It
-does it the way you would by hand: the hint's settings go in with `SET LOCAL`, so
-they last for that one statement's transaction and end with it.
+does it the way you would by hand: the hint's settings go in with `SET LOCAL`, for
+that one statement only.
 
 - **Only where nothing else can feel it.** A hint is applied only when the session
-  is idle and the statement is all the client sent before its Sync: a statement
-  that starts and ends its own transaction. Inside the application's own
-  transaction, or in a pipeline of several statements, LQO passes it through as
-  it came.
+  is idle and the statement is all the client sent before its Sync. On its own,
+  the statement is its own transaction, and the settings end with it.
+- **Inside the application's transactions too.** Most ORMs run every statement
+  inside a transaction of their own (`BEGIN`, a few statements, `COMMIT`), where a
+  `SET LOCAL` would last to the `COMMIT`. There, LQO first saves each setting the
+  hint changes, then sets the hint, and sets every one back right after the
+  statement, before the next one can run. The application's own settings in that
+  transaction, from `SET` or `SET LOCAL`, come back as they were. If the
+  statement fails, the transaction is aborted anyway, and `ROLLBACK` or
+  `ROLLBACK TO SAVEPOINT` takes LQO's settings away with the rest. Only a single
+  statement is hinted there: a simple query holding several, or a statement sent
+  in a pipeline while others are still in flight, goes through as it came. A
+  transaction that has already failed gets nothing.
 - **How.** For a simple query, LQO puts
   `SELECT set_config('enable_nestloop', 'off', true), ...; ` in front of it, in the
   same message, and takes that SELECT's reply out before it reaches the client.
   For a prepared statement it runs the same SELECT, as a statement of its own,
-  between the client's Parse and Bind, where PostgreSQL makes the plan. Either
-  way the client sees exactly the replies it would without LQO. Error positions
-  are corrected to point into the client's own text. The hint also sets
-  `plan_cache_mode = force_custom_plan` for that transaction, so a prepared
+  between the client's Parse and Bind, where PostgreSQL makes the plan. Inside a
+  transaction the SELECT saves the settings first, and a second one, after the
+  client's text or before its Sync, sets them back. Either way the client sees
+  exactly the replies it would without LQO. Error positions are corrected to
+  point into the client's own text. The hint also sets
+  `plan_cache_mode = force_custom_plan` for that statement, so a prepared
   statement's cached plan isn't reused without the hint, and no plan made with it
   is cached.
 - **Checked live.** 10% of a hinted shape's calls run without the hint
@@ -577,7 +588,7 @@ refusal, such as a primary without `--allow-primary`.
 [docs/REFERENCE.md](docs/REFERENCE.md) has the details: workload formats, the
 JSON report, the state file and the connection settings.
 
-## What 0.5 doesn't do
+## What 0.6 doesn't do
 
 - **It changes nothing unless you ask.** `lqo advise` and `lqo serve` in shadow
   mode only report. Only `lqo serve --mode active` applies hints, and only ones
@@ -590,6 +601,14 @@ JSON report, the state file and the connection settings.
   estimates and lets PostgreSQL choose the joins; it doesn't write join-order or
   join-method hints of its own. Estimates for single tables can't be corrected
   this way.
+- **No hints for pipelines.** A statement sent while earlier ones are still in
+  flight runs as it came, inside a transaction or not; so does a simple query
+  of several statements inside a transaction.
+- **One trace of its own in a transaction.** After a hinted statement inside a
+  transaction, LQO's placeholder settings (`lqo.saved_enable_nestloop` and the
+  like) exist in that session: `current_setting('lqo.saved_enable_nestloop',
+  true)` returns an empty string there instead of NULL. Nothing reads them but
+  LQO.
 - **PostgreSQL only**, 14 to 18. Earlier versions may work but aren't tested.
 
 ## Building and testing
@@ -621,12 +640,17 @@ the learner finds the demo trap from traffic sent through the proxy; losing the
 replica pauses learning while queries carry on; and `lqo serve` killed with
 SIGKILL 10 times while saving leaves its state file whole and keeps what it
 learned. For active mode: a hint is applied to plain and prepared queries and the
-very next statement in the session sees nothing of it; nothing is applied inside
-the application's own transaction or in a pipeline; answers are the same with
-hints applied; error positions still point into the application's text; the
+very next statement in the session sees nothing of it, outside or inside the
+application's own transaction; the application's own `SET` and `SET LOCAL` in
+that transaction come back as they were; savepoints, a hinted statement that
+fails, `ROLLBACK TO SAVEPOINT` and `ROLLBACK` leave nothing of LQO's behind;
+pipelines inside a transaction get every reply in order and no hint where it
+wasn't meant; answers are the same with hints applied; error positions still point into the application's text; the
 switches act on the next query; nothing is applied while the replica or the state
 file is unavailable; the guard takes back a hint that runs slower live; and
-pgbench runs through an active proxy in every protocol, pipelines included.
+pgbench runs through an active proxy in every protocol, pipelines included, and
+inside transactions, where the statement after each hinted one fails if it sees
+any of the hint.
 
 `sh scripts/record-tests.sh` runs them all and writes the output to
 [test/results/](test/results/). The Join Order Benchmark, 113 queries in 94 shapes

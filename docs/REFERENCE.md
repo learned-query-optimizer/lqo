@@ -361,8 +361,9 @@ With `--mode active`, each shape whose status is `proven`, and that isn't
 switched off, has its hint applied to live calls. A call gets it only when all
 of these hold:
 
-- the session's last ReadyForQuery said idle (`I`), and every earlier request has
-  been answered;
+- the session's last ReadyForQuery said idle (`I`) or in a transaction (`T`,
+  not `E`), and every earlier request has been answered;
+- in a transaction, for a simple query: its text is a single statement;
 - for a simple query: the Query is the only message since;
 - for the extended protocol: the client's messages since are an optional Parse
   and this Bind, and what it has already sent after the Bind is an optional
@@ -387,6 +388,32 @@ set_config('plan_cache_mode', 'force_custom_plan', true)`, which is `SET LOCAL`:
 |---|---|---|
 | simple | the SELECT and `; ` in front of the client's text, in the same Query, so both run in one implicit transaction | the SELECT's RowDescription, DataRow and CommandComplete |
 | extended | Parse (once per session, as `lqo_hint_N`), Bind to portal `lqo_hint` and Execute of the SELECT, after the client's Parse and before its Bind | the matching ParseComplete, BindComplete, DataRow and CommandComplete |
+
+Inside the client's transaction (`T`), the settings must not outlast the
+statement, so there are two statements of LQO's. The first, Save, keeps each
+setting the hint changes (`plan_cache_mode` included) in a placeholder setting of
+its own and then sets the hint, in one SELECT:
+`set_config('lqo.saved_enable_nestloop', current_setting('enable_nestloop'),
+true), ..., set_config('enable_nestloop', 'off', true), ...`. The second,
+Restore, sets each one back from its placeholder:
+`set_config('enable_nestloop', coalesce(nullif(current_setting('lqo.saved_enable_nestloop',
+true), ''), current_setting('enable_nestloop')), true) AS lqo_restore, ...`. A
+missing or empty placeholder leaves the setting as it is. Both are `SET LOCAL`, so
+the end of the transaction, or a `ROLLBACK TO SAVEPOINT` to a savepoint made
+before the statement, undoes them as well.
+
+| Protocol, in a transaction | What LQO sends | What it takes out of the replies |
+|---|---|---|
+| simple | Save and `; ` in front of the client's text, and a new line, `;`, a new line and Restore after it, in the same Query | Save's RowDescription, DataRow and CommandComplete; after the client's CommandComplete, a RowDescription whose first column is `lqo_restore`, with its DataRow and CommandComplete |
+| extended | Save as above, then Close of portal `lqo_hint`; before the client's Sync, Restore the same way (its own `lqo_hint_N`) | ParseComplete when it was prepared, BindComplete, DataRow, CommandComplete and CloseComplete, for each |
+
+If the client's statement fails, the server skips Restore with the rest of the
+batch (or of the Query); the transaction is then aborted, and only `ROLLBACK` or
+`ROLLBACK TO SAVEPOINT` can follow, which undo LQO's settings too. A statement of
+LQO's whose Parse the server skipped after an error is prepared again the next
+time. After a hinted statement in a transaction, the session has the
+placeholder settings `lqo.saved_<name>`: outside the transaction they read as
+empty.
 
 An error or notice about a hinted simple query has its position (`P`) moved back
 by the length of what LQO added. If LQO's own SELECT fails (it shouldn't), the
