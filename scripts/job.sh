@@ -23,6 +23,11 @@
 # ORM-style transactions, with the hints lqo advise proved
 # (scripts/jobtx), into test/results/job-tx/. JOB_ADVISE=0 skips lqo advise
 # and takes the hints from the report already in the JOB_OUT folder.
+#
+# JOB_STATS=1 then runs the 113 queries once with pg_stat_statements counting
+# (it must be preloaded), and runs lqo advise again with the workload read
+# from the view alone, no file, into test/results/job-stats/, with a
+# shape-by-shape comparison against the file run.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${LQO_DSN:?set LQO_DSN to the database to load IMDB into}"
@@ -111,4 +116,34 @@ if [ "${JOB_TX:-0}" = 1 ]; then
 		echo "command: go run ./scripts/jobtx --rounds ${JOB_TX_ROUNDS:-3}"
 	} > "$tx/environment.txt"
 	echo "results written to $tx/"
+fi
+
+if [ "${JOB_STATS:-0}" = 1 ]; then
+	echo "== JOB through pg_stat_statements"
+	st=test/results/${JOB_STATS_OUT:-job-stats}
+	mkdir -p "$st"
+	psql "$LQO_DSN" -q -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements" -c "SELECT pg_stat_statements_reset()" >/dev/null
+	psql "$LQO_DSN" -q -f "$work/job.sql" >/dev/null
+	start=$(date +%s)
+	rm -f "$st/job.json"
+	limit=()
+	[ -n "${JOB_STATS_LIMIT:-}" ] && limit=(timeout -s INT "$JOB_STATS_LIMIT")
+	"${limit[@]}" "$work/lqo" advise --dsn "$LQO_DSN" --allow-primary --stats --top 113 --repeat 3 --samples 10 \
+		--hints "$hints" --join-hints "${JOB_JOIN_HINTS:-auto}" --max-time "${JOB_MAX_TIME:-120s}" --no-state \
+		--report json --out "$st/job.json" || [ -s "$st/job.json" ]
+	end=$(date +%s)
+	"$work/lqo" report --report text "$st/job.json" > "$st/job.txt"
+	"$work/lqo" report --report markdown "$st/job.json" > "$st/job.md"
+	go run ./scripts/compare "$out/job.json" "$st/job.json" > "$st/compare.md"
+	{
+		echo "# Join Order Benchmark through pg_stat_statements"
+		echo "recorded $(date -u '+%Y-%m-%d %H:%M UTC'), lqo advise took $(( (end - start) / 60 )) minutes"
+		echo "machine: $(uname -sr), $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ //'), $(nproc) CPUs, $(free -g | awk '/Mem:/ {print $2}') GB memory"
+		echo "server: $(psql "$LQO_DSN" -Atc 'SELECT version()')"
+		echo "pg_stat_statements $(psql "$LQO_DSN" -Atc "SELECT extversion FROM pg_extension WHERE extname = 'pg_stat_statements'"), after the 113 queries ran once"
+		echo "compared with: $out/job.json, the same data load"
+		echo "command: lqo advise --allow-primary --stats --top 113 --repeat 3 --samples 10 --hints $hints --max-time ${JOB_MAX_TIME:-120s}${JOB_STATS_LIMIT:+, stopped after $JOB_STATS_LIMIT}"
+	} > "$st/environment.txt"
+	tail -n 2 "$st/compare.md"
+	echo "results written to $st/"
 fi

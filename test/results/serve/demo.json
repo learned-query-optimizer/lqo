@@ -1,7 +1,7 @@
 {
-  "lqo_version": "0.6.0",
+  "lqo_version": "0.7.0",
   "mode": "active",
-  "started": "2026-11-02T02:40:46.898436125Z",
+  "started": "2026-11-02T07:33:38.624307215Z",
   "connections_open": 0,
   "connections_total": 37,
   "watch": {
@@ -12,7 +12,7 @@
   "learning": {
     "rounds": 4,
     "trials": 12,
-    "busy_ms": 111138.55900000001,
+    "busy_ms": 123113.647,
     "last_error_at": "0001-01-01T00:00:00Z",
     "proven": 1,
     "applied": 1,
@@ -26,15 +26,15 @@
       "normalized": "select sum ( l . qty * p . price ) from lqo_demo . customers c join lqo_demo . orders o on o . customer_id = c . id join lqo_demo . order_lines l on l . order_id = o . id join lqo_demo . products p on p . id = l . product_id where c . attrs -\u003e\u003e ? = ? and c . attrs -\u003e\u003e ? = ?",
       "example": "SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON o.customer_id = c.id JOIN lqo_demo.order_lines l ON l.order_id = o.id JOIN lqo_demo.products p ON p.id = l.product_id WHERE c.attrs-\u003e\u003e'tier' = 'basic' AND c.attrs-\u003e\u003e'channel' = 'web'",
       "calls": 74,
-      "total_ms": 116865.29900000001,
+      "total_ms": 123124.20300000005,
       "p50_ms": 1699.7935410721714,
-      "p95_ms": 3399.5870821443427,
-      "last_seen": "2026-11-02T04:48:01.693499312+02:00",
+      "p95_ms": 4042.813146157392,
+      "last_seen": "2026-11-02T09:41:19.675236042+02:00",
       "status": "proven",
       "rounds": 4,
       "texts_tried": 4,
-      "last_tried": "2026-11-02T02:46:47.563440607Z",
-      "baseline_ms": 3039.559,
+      "last_tried": "2026-11-02T07:40:19.883974255Z",
+      "baseline_ms": 3448.072,
       "proven": "no nested loop",
       "settings": [
         {
@@ -42,20 +42,20 @@
           "value": "off"
         }
       ],
-      "gain": 0.5945521053853322,
-      "proven_at": "2026-11-02T02:45:02.354024671Z",
+      "gain": 0.6955495824176812,
+      "proven_at": "2026-11-02T07:38:20.331784793Z",
       "reverted_at": "0001-01-01T00:00:00Z",
       "arms": {
         "hash join only": {
           "n": 4,
-          "mean_log_ratio": -0.9125267108879954,
-          "m2": 0.2229274910557677,
-          "max_ratio": 0.5359154937713665,
+          "mean_log_ratio": -1.1649926898837373,
+          "m2": 0.21477641942243156,
+          "max_ratio": 0.4071811486684724,
           "strict_wins": 4,
           "same_plan": 0,
           "texts": 4,
-          "sum_ms": 3907.215,
-          "sum_base_ms": 9636.787
+          "sum_ms": 3383.8370000000004,
+          "sum_base_ms": 11114.574999999999
         },
         "join order as written": {
           "n": 3,
@@ -68,15 +68,13 @@
           "ruled_out": "it doesn't change the plan"
         },
         "merge join only": {
-          "n": 1,
-          "mean_log_ratio": -0.36140592803945704,
+          "n": 0,
+          "mean_log_ratio": 0,
           "m2": 0,
-          "max_ratio": 0.6966961325639672,
+          "max_ratio": 0,
           "strict_wins": 0,
           "same_plan": 0,
-          "texts": 1,
-          "sum_ms": 2117.649,
-          "sum_base_ms": 3039.559
+          "texts": 0
         },
         "nested loop only": {
           "n": 3,
@@ -89,13 +87,15 @@
           "ruled_out": "it doesn't change the plan"
         },
         "no bitmap scan": {
-          "n": 0,
-          "mean_log_ratio": 0,
-          "m2": 0,
-          "max_ratio": 0,
-          "strict_wins": 0,
+          "n": 4,
+          "mean_log_ratio": -0.28384176732387423,
+          "m2": 0.10942508116106679,
+          "max_ratio": 0.9000662813547889,
+          "strict_wins": 1,
           "same_plan": 0,
-          "texts": 0
+          "texts": 4,
+          "sum_ms": 8179.639,
+          "sum_base_ms": 11114.574999999999
         },
         "no hash join": {
           "n": 3,
@@ -108,15 +108,13 @@
           "ruled_out": "it doesn't change the plan"
         },
         "no index scan": {
-          "n": 3,
-          "mean_log_ratio": -0.39761852735103104,
-          "m2": 0.04715865670390274,
-          "max_ratio": 0.8018774662349953,
+          "n": 0,
+          "mean_log_ratio": 0,
+          "m2": 0,
+          "max_ratio": 0,
           "strict_wins": 0,
           "same_plan": 0,
-          "texts": 3,
-          "sum_ms": 5104.414,
-          "sum_base_ms": 7674.475
+          "texts": 0
         },
         "no memoize": {
           "n": 3,
@@ -140,25 +138,25 @@
         },
         "no nested loop": {
           "n": 4,
-          "mean_log_ratio": -0.9125267108879954,
-          "m2": 0.2229274910557677,
-          "max_ratio": 0.5359154937713665,
+          "mean_log_ratio": -1.1649926898837373,
+          "m2": 0.21477641942243156,
+          "max_ratio": 0.4071811486684724,
           "strict_wins": 4,
           "same_plan": 0,
           "texts": 4,
-          "sum_ms": 3907.215,
-          "sum_base_ms": 9636.787
+          "sum_ms": 3383.8370000000004,
+          "sum_base_ms": 11114.574999999999
         },
         "no nested loop, no sequential scan": {
-          "n": 3,
-          "mean_log_ratio": -0.3694557700390815,
-          "m2": 0.012912423392363051,
-          "max_ratio": 0.7434893126067618,
-          "strict_wins": 3,
+          "n": 2,
+          "mean_log_ratio": -0.5448972662234206,
+          "m2": 0.09755570080083867,
+          "max_ratio": 0.7232211792737909,
+          "strict_wins": 1,
           "same_plan": 0,
-          "texts": 3,
-          "sum_ms": 4532.655,
-          "sum_base_ms": 6597.228
+          "texts": 2,
+          "sum_ms": 4018.1580000000004,
+          "sum_base_ms": 6787.110000000001
         },
         "no parallel workers": {
           "n": 0,
@@ -170,29 +168,29 @@
           "texts": 0
         },
         "no sequential scan": {
-          "n": 1,
-          "mean_log_ratio": -0.009964829162427162,
-          "m2": 0,
-          "max_ratio": 0.9900846552434068,
+          "n": 2,
+          "mean_log_ratio": -0.06996113355266406,
+          "m2": 0.002558577259923823,
+          "max_ratio": 0.9663840185904974,
           "strict_wins": 0,
           "same_plan": 0,
-          "texts": 1,
-          "sum_ms": 1942.855,
-          "sum_base_ms": 1962.312
+          "texts": 2,
+          "sum_ms": 4036.3160000000003,
+          "sum_base_ms": 4327.465
         }
       },
       "family": "lqo_demo.customers,lqo_demo.order_lines,lqo_demo.orders,lqo_demo.products",
       "trials": 12,
-      "busy_ms": 111138.55900000001,
+      "busy_ms": 123113.647,
       "rounds_to_proof": 3,
       "trials_to_proof": 9,
-      "busy_to_proof_ms": 79475.1,
+      "busy_to_proof_ms": 88681.88,
       "applied": true,
-      "hinted_calls": 33,
-      "hinted_p50_ms": 814.265,
-      "holdout_calls": 15,
-      "holdout_p50_ms": 1868.071,
-      "before_p50_ms": 1908.3600000000001
+      "hinted_calls": 37,
+      "hinted_p50_ms": 838.282,
+      "holdout_calls": 11,
+      "holdout_p50_ms": 2000.975,
+      "before_p50_ms": 2045.663
     },
     {
       "key": "lqotest/5fcb12e39b337776",
@@ -201,10 +199,10 @@
       "normalized": "select c . id , count ( * ) , sum ( l . qty ) from lqo_demo . customers c join lqo_demo . orders o on o . customer_id = c . id join lqo_demo . order_lines l on l . order_id = o . id where c . id = ? group by c . id",
       "example": "SELECT c.id, count(*), sum(l.qty) FROM lqo_demo.customers c JOIN lqo_demo.orders o ON o.customer_id = c.id JOIN lqo_demo.order_lines l ON l.order_id = o.id WHERE c.id = 4242 GROUP BY c.id",
       "calls": 37,
-      "total_ms": 37.02199999999999,
-      "p50_ms": 0.9870149282610821,
+      "total_ms": 35.391,
+      "p50_ms": 0.8299773149766462,
       "p95_ms": 1.39584989781153,
-      "last_seen": "2026-11-02T04:48:01.694737332+02:00",
+      "last_seen": "2026-11-02T09:41:19.676269792+02:00",
       "status": "learning",
       "rounds": 0,
       "texts_tried": 0,

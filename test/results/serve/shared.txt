@@ -3,22 +3,22 @@
 # default), once with --share=false, from the same state file. Traffic: each
 # report's two texts every 5 seconds for two minutes; --budget 100, so the
 # replica runs flat out and the times below are replica time.
-# recorded 2026-11-02 02:57 UTC, lqo 0.6.0
+# recorded 2026-11-02 07:52 UTC, lqo 0.7.0
 # Linux 6.18.44-fc-v185, Intel(R) Xeon(R) Processor @ 2.10GHz, 2 CPUs
 # server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
 # LQO, pgbench and PostgreSQL share this machine, so every one of them
 # takes CPU from the others; on separate machines the cost is lower.
 
-with sharing, all three proven after 164 s:
-  avg(p.price)           'no nested loop', 3 rounds, 3 hint trials, 49.5 s of replica time, head start from 3
-  max(p.price * l.qty)   'no nested loop', 3 rounds, 3 hint trials, 52.0 s of replica time, head start from 3
-  sum(l.qty)             'no nested loop', 3 rounds, 3 hint trials, 40.3 s of replica time, head start from 3
-  together               9 rounds, 9 hint trials, 141.7 s of replica time
+with sharing, all three proven after 167 s:
+  avg(p.price)           'no nested loop', 3 rounds, 3 hint trials, 50.6 s of replica time, head start from 3
+  max(p.price * l.qty)   'no nested loop', 3 rounds, 3 hint trials, 53.5 s of replica time, head start from 3
+  sum(l.qty)             'no nested loop', 3 rounds, 3 hint trials, 42.1 s of replica time, head start from 3
+  together               9 rounds, 9 hint trials, 146.2 s of replica time
 
-without sharing (--share=false), all three proven after 306 s:
-  avg(p.price)           'no nested loop', 3 rounds, 9 hint trials, 101.5 s of replica time
-  max(p.price * l.qty)   'no nested loop', 3 rounds, 9 hint trials, 87.9 s of replica time
-  sum(l.qty)             'no nested loop', 3 rounds, 9 hint trials, 92.9 s of replica time
-  together               9 rounds, 27 hint trials, 282.3 s of replica time
+without sharing (--share=false), all three proven after 347 s:
+  avg(p.price)           'no nested loop', 3 rounds, 9 hint trials, 101.7 s of replica time
+  max(p.price * l.qty)   'no nested loop', 3 rounds, 9 hint trials, 99.2 s of replica time
+  sum(l.qty)             'no nested loop', 4 rounds, 12 hint trials, 121.4 s of replica time
+  together               10 rounds, 30 hint trials, 322.3 s of replica time
 
-sharing: 9 rounds against 9, 141.7 s of replica time against 282.3 s, 50% less
+sharing: 9 rounds against 10, 146.2 s of replica time against 322.3 s, 55% less

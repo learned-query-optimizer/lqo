@@ -117,7 +117,9 @@ Values for each `$n`, chosen from the text around it:
 
 A qualified expression (`c.region`, `app.orders.total`) reads the nearest FROM
 item of that name: in its own query level first, then the levels around it, as
-PostgreSQL resolves it. An unqualified one belongs to the first table of its own
+PostgreSQL resolves it; each branch of a UNION, INTERSECT or EXCEPT is a level
+of its own, and a WITH query's name isn't a table, so a parameter compared with
+a column of one is skipped. An unqualified one belongs to the first table of its own
 level where it reads, then of the levels around it. A parameter that's part of a
 calculation (`t.a + $1 = t.b`, `now() - $1`) gets no value: the shape is skipped.
 Every sampling statement starts with the comment `/* lqo sample */`, so a later

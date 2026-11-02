@@ -86,23 +86,18 @@ a report like this one, from the recorded run in
 [test/results/demo/report.txt](test/results/demo/report.txt):
 
 ```
-Faster with a hint: 3 of 5 tested
+Faster with a hint: 2 of 5 tested
 
   1. ef02bfce  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_…  (2 calls)
-     2,034 ms → 980 ms (−52%) with "no nested loop"
+     1,996 ms → 845 ms (−58%) with "no nested loop"
      Plan: Nested Loop ×3, Bitmap Heap Scan on orders, Index Scan on order_lines, Index Scan on products → Hash Join ×3, Seq Scan on order_lines, Seq Scan on orders, Seq Scan on products
        SET LOCAL enable_nestloop = off;
 
   2. 6c73a7a6  SELECT id, created_at FROM lqo_demo.customers WHERE attrs->>'ti…  (1 call)
-     54.0 ms → 31.5 ms (−42%) with "no index scan"
+     31.2 ms → 23.0 ms (−26%) with "no index scan"
      Plan: Index Scan on customers → Seq Scan on customers
        SET LOCAL enable_indexscan = off;
        SET LOCAL enable_indexonlyscan = off;
-
-  3. b690ee77  SELECT region, count(*) FROM lqo_demo.customers GROUP BY region…  (1 call)
-     30.3 ms → 22.7 ms (−25%) with "no parallel workers"
-     Plan: same joins and scans
-       SET LOCAL max_parallel_workers_per_gather = 0;
 ```
 
 Times depend on the machine. On a slower or busier one the margins move, and LQO
@@ -360,20 +355,20 @@ only needs the server's address and TLS settings; `--replica` needs a login, lik
 The status page, on `http://127.0.0.1:6434/` by default, shows what it has seen and
 learned, and `/status` has the same as JSON. `lqo show` reads it from the state
 file afterwards. This is the recorded run on the demo, from
-[test/results/serve/demo.txt](test/results/serve/demo.txt), four minutes in, when the first hint was proven:
+[test/results/serve/demo.txt](test/results/serve/demo.txt), almost five minutes in, when the first hint was proven:
 
 ```
-lqo 0.6.0, active mode, up 4m19s
+lqo 0.7.0, active mode, up 4m43s
 connections: 0 open, 13 in all
 statements measured: 39 in 2 shapes
-learning: 3 rounds, 9 hint trials, replica busy 1m19s, 1 proven
+learning: 3 rounds, 9 hint trials, replica busy 1m29s, 1 proven
 applying: 1 hint
 
 ef02bfce  lqotest  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
-  26 calls, 57,458 ms in all, median 2,021 ms, p95 3,400 ms
-  proven: "no nested loop", about 54% faster on the replica, after 3 rounds
+  26 calls, 61,129 ms in all, median 2,021 ms, p95 4,043 ms
+  proven: "no nested loop", about 67% faster on the replica, after 3 rounds
     SET LOCAL enable_nestloop = off;
-  applied: 0 calls, median 0.00 ms; 1,908 ms before
+  applied: 0 calls, median 0.00 ms; 2,046 ms before
 ```
 
 **How it learns.** Trying all 13 hints on every text would keep the replica busy
@@ -399,15 +394,15 @@ it fails once, the shape goes back to three at a time. Either way a hint is
 proven for the new shape on its own texts, by the same rule, and its own
 results soon outweigh the relatives'. `--share=false` turns it off. In the
 recorded run, three new reports on the same tables as the demo's trap were all
-proven in 164 seconds and 142 seconds of replica time with sharing, against 306
-and 282 seconds without: 9 plan runs instead of 27
+proven in 167 seconds and 146 seconds of replica time with sharing, against 347
+and 322 seconds without: 9 plan runs instead of 30
 ([test/results/serve/shared.txt](test/results/serve/shared.txt)).
 
 **What it costs.** The learner keeps the replica busy at most a quarter of the time
 (`--budget`). The proxy adds time to every query, mostly the extra hop. On the
 two-core test machine, shared by pgbench, PostgreSQL and LQO, a one-row indexed
-SELECT took 0.11 ms straight and 0.35 ms through LQO with prepared statements, and
-0.19 ms against 0.50 ms with plain queries
+SELECT took 0.10 ms straight and 0.37 ms through LQO with prepared statements, and
+0.20 ms against 0.52 ms with plain queries
 ([test/results/serve/overhead.txt](test/results/serve/overhead.txt)). With LQO on
 its own cores, or next to the application, the cost is lower; measure it on yours
 before you rely on it. Measuring never holds traffic up: if LQO falls behind, it drops
@@ -495,16 +490,16 @@ the first hint was proven, with a quarter of the calls held out (`--holdout 25`)
 
 ```
 ef02bfce  lqotest  SELECT sum(l.qty * p.price) FROM lqo_demo.customers c JOIN lqo_demo.o…
-  74 calls, 116,865 ms in all, median 1,700 ms, p95 3,400 ms
-  proven: "no nested loop", about 59% faster on the replica, after 3 rounds
+  74 calls, 123,124 ms in all, median 1,700 ms, p95 4,043 ms
+  proven: "no nested loop", about 70% faster on the replica, after 3 rounds
     SET LOCAL enable_nestloop = off;
-  applied: 33 calls, median 814 ms; 15 held out, median 1,868 ms; 1,908 ms before
+  applied: 37 calls, median 838 ms; 11 held out, median 2,001 ms; 2,046 ms before
 ```
 
 Applying a hint costs one more statement in the same round trip (two inside a
 transaction). With every one of pgbench's SELECTs hinted, the one-row SELECT took
-0.62 ms through LQO with prepared statements and 0.68 ms with plain queries,
-against 0.35 ms and 0.50 ms unhinted
+0.67 ms through LQO with prepared statements and 0.76 ms with plain queries,
+against 0.37 ms and 0.52 ms unhinted
 ([test/results/serve/overhead.txt](test/results/serve/overhead.txt)).
 
 ## What LQO will and won't run
@@ -695,10 +690,17 @@ switches act on the next query; nothing is applied while the replica or the stat
 file is unavailable; the guard takes back a hint that runs slower live; and
 pgbench runs through an active proxy in every protocol, pipelines included, and
 inside transactions, where the statement after each hinted one fails if it sees
-any of the hint.
+any of the hint. For `--stats`: values on one table come from the same rows, an
+IN list's values differ, JSON keys and their values go together, names resolve by
+query level as PostgreSQL resolves them, and LQO's sampling statements can't
+leave their read-only transaction or run a second statement, whatever a column
+name in the query holds.
 
 `sh scripts/record-tests.sh` runs them all and writes the output to
-[test/results/](test/results/). The Join Order Benchmark, 113 queries in 94 shapes
+[test/results/](test/results/). It also runs the demo with its workload read from
+pg_stat_statements instead of the file ([test/results/stats/](test/results/stats/)):
+the trap gets the same hint, "no nested loop", and the shape whose trap is a value
+only 15 rows in 200,000 have doesn't, because the sample never sees it. The Join Order Benchmark, 113 queries in 94 shapes
 over the IMDB data set, runs in the [job workflow](.github/workflows/job.yml) on a
 GitHub runner and records its reports in
 [test/results/job-join-hints/](test/results/job-join-hints/). In the latest run
@@ -720,6 +722,11 @@ calls of the 44 proven shapes made with hints on were hinted, no statement after
 one saw any of its settings, and a pass over the 113 queries took 152.8 s with
 hints off and 63.7 s on (−58%); the proven shapes alone went from 117.6 s to
 28.9 s (−75%).
+
+With `stats` set, the workflow then runs the 113 queries once with
+pg_stat_statements counting and advises again from the view alone, with no file,
+into [test/results/job-stats/](test/results/job-stats/), with a shape-by-shape
+comparison against the file run on the same data load.
 
 CI runs every push on Linux against PostgreSQL 14 and 18, and on macOS and Windows.
 Releases are automated: see [RELEASING.md](RELEASING.md).

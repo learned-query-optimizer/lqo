@@ -157,11 +157,19 @@ Steps:
        real-server tests; CI preloads pg_stat_statements (test.yml docker
        restart, LQO_REQUIRE_STATS; pg-hint-plan job and job.yml)
 3. [x] CLI `--stats`, `--stats-dsn`; README, docs/REFERENCE.md
-4. [ ] recorded demo run (scripts/stats-demo.sh, from record-tests.sh;
-       first local run: the trap gets "no nested loop" from the view as from
-       the file; the platinum trap is too rare for the sample); JOB workflow
-       stats run (job.sh JOB_STATS, scripts/compare)
-5. [ ] independent review, fixes, record-tests.sh
+4. [x] recorded demo run (scripts/stats-demo.sh, from record-tests.sh: the
+       trap gets "no nested loop" from the view as from the file, 4 of 5
+       shapes the same; the platinum trap is too rare for the sample)
+4b. [ ] JOB workflow stats run (job.sh JOB_STATS, scripts/compare), started
+       with the release push; README and post numbers after it
+5. [x] independent review, two rounds (round 1: 7 defects, among them a
+       blocker, SQL from a quoted column name run after a COMMIT through a
+       "--" comment formed when the expression was written back; round 2: 3,
+       set-operation branches, WITH names, calculations in BETWEEN/LIKE), all
+       fixed with failing-first tests (review_070*_test.go); sampling
+       statements now run alone through ExecOne, checked by Lex, marked
+       /* lqo sample */. record-tests.sh 2026-11-02: 150 tests passed, 6
+       skipped (pg_hint_plan, md5, TLS not set up here; CI has pg_hint_plan)
 6. [ ] release 0.7.0; lqo.net post; softdevstudio note; softdev-plan.md
 
 ## Done: 0.6.0 Phase A, hints inside app transactions (released 2026-11-02)

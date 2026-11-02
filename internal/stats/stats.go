@@ -416,7 +416,7 @@ func (f *Filler) fill(ctx context.Context, query string, uses map[int]sqltext.Pa
 		if r == nil {
 			return nil, fmt.Sprintf("LQO can't choose a value for $%d: no table here has %s", n, u.Expr), nil
 		}
-		key := strings.ToLower(r.Alias)
+		key := strings.ToLower(r.Table + " " + r.Alias) // one alias may name different tables at different levels
 		g := byAlias[key]
 		if g == nil {
 			g = &group{rng: *r}

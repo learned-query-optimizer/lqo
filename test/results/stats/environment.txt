@@ -1,0 +1,6 @@
+# Demo workload through pg_stat_statements
+# recorded 2026-11-02 07:10 UTC, lqo 0.7.0 (go1.24.7, linux/amd64)
+# server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+# pg_stat_statements 1.10
+# the demo workload run 3 times with psql, then:
+# command: lqo advise --allow-primary --stats (no workload file)

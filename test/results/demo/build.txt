@@ -1,11 +1,11 @@
 # Demo database build, scale 1
-# recorded 2026-11-02 02:35 UTC with go1.24.7 linux/amd64
+# recorded 2026-11-02 07:05 UTC with go1.24.7 linux/amd64
 # Linux 6.18.44-fc-v185, Intel(R) Xeon(R) Processor @ 2.10GHz, 2 CPUs
 # server: PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
-# shared_preload_libraries: nothing
+# shared_preload_libraries: pg_stat_statements
 # command: lqo demo --scale 1
 
-Wrote the workload to /tmp/tmp.Bh6WXEdanm/lqo-demo.sql
+Wrote the workload to /tmp/tmp.T8VWAHgdDv/lqo-demo.sql
   DROP SCHEMA IF EXISTS lqo_demo CASCADE
   CREATE SCHEMA lqo_demo
   CREATE TABLE lqo_demo.customers AS
@@ -23,7 +23,7 @@ Wrote the workload to /tmp/tmp.Bh6WXEdanm/lqo-demo.sql
   VACUUM ANALYZE lqo_demo.orders
   VACUUM ANALYZE lqo_demo.order_lines
   VACUUM ANALYZE lqo_demo.products
-Built the lqo_demo schema in 7s.
+Built the lqo_demo schema in 6s.
 
 Next, with the same connection string:
-  lqo advise --allow-primary --dsn ... /tmp/tmp.Bh6WXEdanm/lqo-demo.sql
+  lqo advise --allow-primary --dsn ... /tmp/tmp.T8VWAHgdDv/lqo-demo.sql

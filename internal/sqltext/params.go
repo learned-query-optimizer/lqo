@@ -70,7 +70,13 @@ type item struct {
 // fromItems returns every FROM and JOIN item of a statement, in order.
 func fromItems(code []Token) []item {
 	var out []item
-	add := func(r Range, at int) { out = append(out, item{r, at}) }
+	ctes := cteNames(code)
+	add := func(r Range, at int) {
+		if r.Table != "" && !strings.Contains(r.Table, ".") && ctes[identName(Lex(r.Table)[0])] {
+			r.Table = "" // a WITH query, not a table
+		}
+		out = append(out, item{r, at})
+	}
 	inFrom := []bool{false}
 	expect := false
 	for i := 0; i < len(code); i++ {
@@ -152,6 +158,43 @@ func fromItems(code []Token) []item {
 	return out
 }
 
+// cteNames returns the names a statement's WITH clauses define: a name
+// after WITH, RECURSIVE or a comma, then an optional column list, AS, and
+// optionally [NOT] MATERIALIZED, then the parenthesis of its query.
+func cteNames(code []Token) map[string]bool {
+	out := map[string]bool{}
+	for i := 1; i < len(code); i++ {
+		t := code[i]
+		if t.Kind != Word && t.Kind != Ident {
+			continue
+		}
+		p := code[i-1]
+		if !(p.Kind == Word && (strings.EqualFold(p.Text, "with") || strings.EqualFold(p.Text, "recursive")) || p.Kind == Op && p.Text == ",") {
+			continue
+		}
+		j := i + 1
+		if j < len(code) && code[j].Kind == Op && code[j].Text == "(" {
+			if k := matchParen(code, j); k > 0 {
+				j = k + 1
+			}
+		}
+		if j >= len(code) || code[j].Kind != Word || !strings.EqualFold(code[j].Text, "as") {
+			continue
+		}
+		j++
+		if j < len(code) && code[j].Kind == Word && strings.EqualFold(code[j].Text, "not") {
+			j++
+		}
+		if j < len(code) && code[j].Kind == Word && strings.EqualFold(code[j].Text, "materialized") {
+			j++
+		}
+		if j < len(code) && code[j].Kind == Op && code[j].Text == "(" {
+			out[identName(t)] = true
+		}
+	}
+	return out
+}
+
 // scopes gives each token the query level it belongs to: a parenthesis that
 // opens a SELECT, WITH, VALUES or TABLE starts a new level inside the one
 // around it. A parenthesis itself belongs to the level outside it.
@@ -161,6 +204,16 @@ func scopes(code []Token) (scopeOf, parent []int) {
 	stack := []int{0}
 	for i, t := range code {
 		cur := stack[len(stack)-1]
+		if t.Kind == Word {
+			switch strings.ToLower(t.Text) {
+			case "union", "intersect", "except":
+				// Each branch of a set operation is a level of its own,
+				// beside the one before it.
+				cur = len(parent)
+				parent = append(parent, parent[stack[len(stack)-1]])
+				stack[len(stack)-1] = cur
+			}
+		}
 		scopeOf[i] = cur
 		if t.Kind != Op {
 			continue
@@ -391,6 +444,12 @@ func paramUse(code []Token, i int) ParamUse {
 		}
 	}
 
+	// A parameter that's an operand of arithmetic or concatenation isn't
+	// the value of what it's compared with: t.a + $1 = t.b.
+	if arith(code, before) || arith(code, end) {
+		return ParamUse{Reason: "it's part of a calculation"}
+	}
+
 	// x BETWEEN $1 AND $2
 	if word(before, "between") || (word(before, "symmetric") && word(before-1, "between")) {
 		b := before
@@ -428,12 +487,6 @@ func paramUse(code []Token, i int) ParamUse {
 			b--
 		}
 		return withExpr(code, exprBefore(code, b), ParamUse{Use: UseEqual})
-	}
-
-	// A parameter that's an operand of arithmetic or concatenation isn't
-	// the value of what it's compared with: t.a + $1 = t.b.
-	if arith(code, before) || arith(code, end) {
-		return ParamUse{Reason: "it's part of a calculation"}
 	}
 
 	// x OP $1

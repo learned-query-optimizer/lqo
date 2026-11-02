@@ -1,0 +1,2257 @@
+{
+  "lqo_version": "0.7.0",
+  "started": "2026-11-02T07:07:28.914743688Z",
+  "finished": "2026-11-02T07:10:37.012134615Z",
+  "server": "PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit",
+  "server_version_num": 160015,
+  "database": "lqotest",
+  "target": "localhost:5432 as postgres, database lqotest",
+  "standby": false,
+  "hint_set": "standard",
+  "join_hints": "off: pg_hint_plan isn't installed or can't be loaded",
+  "arms": 13,
+  "repeat": 3,
+  "samples_per_shape": 3,
+  "min_gain": 0.2,
+  "timeout_factor": 3,
+  "max_time_ms": 60000,
+  "workload": [
+    "pg_stat_statements on the --dsn server (16 entries, 5 reads, 4 not reads, 7 on system catalogs only)"
+  ],
+  "statements": 13,
+  "shapes_total": 5,
+  "shapes": [
+    {
+      "id": "ef02bfce3698bbb1",
+      "query_id": "-5994737455642912476",
+      "normalized": "select sum ( l . qty * p . price ) from lqo_demo . customers c join lqo_demo . orders o on o . customer_id = c . id join lqo_demo . order_lines l on l . order_id = o . id join lqo_demo . products p on p . id = l . product_id where c . attrs ->> ? = ? and c . attrs ->> ? = ?",
+      "calls": 6,
+      "logged_ms": 12206.828093999999,
+      "example": "SELECT sum(l.qty * p.price)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n  JOIN lqo_demo.products p ON p.id = l.product_id\n WHERE c.attrs->>'channel' = 'partner' AND c.attrs->>'tier' = 'gold'",
+      "verdict": "faster",
+      "baseline_ms": 6018.226,
+      "best": {
+        "name": "no nested loop",
+        "settings": [
+          {
+            "name": "enable_nestloop",
+            "value": "off"
+          }
+        ],
+        "set_local": [
+          "SET LOCAL enable_nestloop = off;"
+        ],
+        "ms": 2558.786,
+        "gain": 0.5748271999090762,
+        "plan_change": "Nested Loop ×3, Bitmap Heap Scan on orders, Index Scan on order_lines, Index Scan on products → Hash Join ×3, Seq Scan on order_lines, Seq Scan on orders, Seq Scan on products",
+        "same_plan_as": [
+          "hash join only"
+        ]
+      },
+      "distinct_plans": 8,
+      "notes": [
+        "pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with"
+      ],
+      "samples": [
+        {
+          "text": "SELECT sum(l.qty * p.price)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n  JOIN lqo_demo.products p ON p.id = l.product_id\n WHERE c.attrs->>'channel' = 'partner' AND c.attrs->>'tier' = 'gold'",
+          "baseline_ms": 1965.9979999999998,
+          "baseline_runs": [
+            1939.501,
+            2033.969,
+            1965.9979999999998
+          ],
+          "rows": 1,
+          "baseline_plan": [
+            "Nested Loop",
+            "Nested Loop",
+            "Nested Loop",
+            "Seq Scan on customers",
+            "Bitmap Heap Scan on orders",
+            "Index Scan on order_lines",
+            "Index Scan on products"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "0a6f302f77f31a5c",
+              "ms": 842.042,
+              "runs": [
+                842.042,
+                830.437,
+                862.137
+              ],
+              "rows": 1
+            },
+            {
+              "name": "join order as written",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 1965.9979999999998,
+              "runs": [
+                1939.501,
+                2033.969,
+                1965.9979999999998
+              ],
+              "rows": 1
+            },
+            {
+              "name": "merge join only",
+              "plan": "21ac2516d9b91740",
+              "ms": 2065.726,
+              "runs": [
+                1832.929,
+                2065.726,
+                2127.2459999999996
+              ],
+              "rows": 1
+            },
+            {
+              "name": "nested loop only",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 1965.9979999999998,
+              "runs": [
+                1939.501,
+                2033.969,
+                1965.9979999999998
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "b7d45e84f9a34722",
+              "ms": 1906.3049999999998,
+              "runs": [
+                1830.581,
+                2097.523,
+                1906.3049999999998
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no hash join",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 1965.9979999999998,
+              "runs": [
+                1939.501,
+                2033.969,
+                1965.9979999999998
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no index scan",
+              "plan": "4c71ea7adbac5ab1",
+              "ms": 1669.586,
+              "runs": [
+                1669.586,
+                1735.996,
+                1635.6899999999998
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no memoize",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 1965.9979999999998,
+              "runs": [
+                1939.501,
+                2033.969,
+                1965.9979999999998
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no merge join",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 1965.9979999999998,
+              "runs": [
+                1939.501,
+                2033.969,
+                1965.9979999999998
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no nested loop",
+              "plan": "0a6f302f77f31a5c",
+              "ms": 842.042,
+              "runs": [
+                842.042,
+                830.437,
+                862.137
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "3ca09a83643ffea1",
+              "ms": 1433.913,
+              "runs": [
+                1374.135,
+                1433.913,
+                1530.5990000000002
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "34393b0133e092aa",
+              "ms": 3118.9139999999998,
+              "runs": [
+                3066.754,
+                3118.9139999999998,
+                3495.2999999999997
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "45608c3db976082c",
+              "ms": 2025.0539999999999,
+              "runs": [
+                1972.898,
+                2025.0539999999999,
+                2132.192
+              ],
+              "rows": 1
+            }
+          ]
+        },
+        {
+          "text": "SELECT sum(l.qty * p.price)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n  JOIN lqo_demo.products p ON p.id = l.product_id\n WHERE c.attrs->>'channel' = 'web' AND c.attrs->>'tier' = 'basic'",
+          "baseline_ms": 2025.758,
+          "baseline_runs": [
+            2149.064,
+            1980.377,
+            2025.758
+          ],
+          "rows": 1,
+          "baseline_plan": [
+            "Nested Loop",
+            "Nested Loop",
+            "Nested Loop",
+            "Seq Scan on customers",
+            "Bitmap Heap Scan on orders",
+            "Index Scan on order_lines",
+            "Index Scan on products"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "0a6f302f77f31a5c",
+              "ms": 855.466,
+              "runs": [
+                758.861,
+                905.045,
+                855.466
+              ],
+              "rows": 1
+            },
+            {
+              "name": "join order as written",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 2025.758,
+              "runs": [
+                2149.064,
+                1980.377,
+                2025.758
+              ],
+              "rows": 1
+            },
+            {
+              "name": "merge join only",
+              "plan": "21ac2516d9b91740",
+              "ms": 1968.196,
+              "runs": [
+                1968.196,
+                1923.39,
+                1981.789
+              ],
+              "rows": 1
+            },
+            {
+              "name": "nested loop only",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 2025.758,
+              "runs": [
+                2149.064,
+                1980.377,
+                2025.758
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "b7d45e84f9a34722",
+              "ms": 1783.7740000000001,
+              "runs": [
+                1821.245,
+                1719.0059999999999,
+                1783.7740000000001
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no hash join",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 2025.758,
+              "runs": [
+                2149.064,
+                1980.377,
+                2025.758
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no index scan",
+              "plan": "4c71ea7adbac5ab1",
+              "ms": 1727.133,
+              "runs": [
+                1698.71,
+                1727.133,
+                1731.073
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no memoize",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 2025.758,
+              "runs": [
+                2149.064,
+                1980.377,
+                2025.758
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no merge join",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 2025.758,
+              "runs": [
+                2149.064,
+                1980.377,
+                2025.758
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no nested loop",
+              "plan": "0a6f302f77f31a5c",
+              "ms": 855.466,
+              "runs": [
+                758.861,
+                905.045,
+                855.466
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "3ca09a83643ffea1",
+              "ms": 1476.698,
+              "runs": [
+                1476.698,
+                1487.337,
+                1473.753
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "34393b0133e092aa",
+              "ms": 3067.196,
+              "runs": [
+                3141.471,
+                3067.196,
+                3021.58
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "45608c3db976082c",
+              "ms": 2047.825,
+              "runs": [
+                2122.735,
+                1987.305,
+                2047.825
+              ],
+              "rows": 1
+            }
+          ]
+        },
+        {
+          "text": "SELECT sum(l.qty * p.price)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n  JOIN lqo_demo.products p ON p.id = l.product_id\n WHERE c.attrs->>'tier' = 'gold' AND c.attrs->>'channel' = 'partner'",
+          "baseline_ms": 2026.47,
+          "baseline_runs": [
+            2105.1870000000004,
+            2017.4499999999998,
+            2026.47
+          ],
+          "rows": 1,
+          "baseline_plan": [
+            "Nested Loop",
+            "Nested Loop",
+            "Nested Loop",
+            "Seq Scan on customers",
+            "Bitmap Heap Scan on orders",
+            "Index Scan on order_lines",
+            "Index Scan on products"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "0a6f302f77f31a5c",
+              "ms": 861.278,
+              "runs": [
+                933.9,
+                861.278,
+                797.7950000000001
+              ],
+              "rows": 1
+            },
+            {
+              "name": "join order as written",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 2026.47,
+              "runs": [
+                2105.1870000000004,
+                2017.4499999999998,
+                2026.47
+              ],
+              "rows": 1
+            },
+            {
+              "name": "merge join only",
+              "plan": "21ac2516d9b91740",
+              "ms": 2010.846,
+              "runs": [
+                2062.602,
+                1912.28,
+                2010.846
+              ],
+              "rows": 1
+            },
+            {
+              "name": "nested loop only",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 2026.47,
+              "runs": [
+                2105.1870000000004,
+                2017.4499999999998,
+                2026.47
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "b7d45e84f9a34722",
+              "ms": 1801.029,
+              "runs": [
+                1903.996,
+                1801.029,
+                1654.404
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no hash join",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 2026.47,
+              "runs": [
+                2105.1870000000004,
+                2017.4499999999998,
+                2026.47
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no index scan",
+              "plan": "4c71ea7adbac5ab1",
+              "ms": 1742.229,
+              "runs": [
+                1841.449,
+                1742.229,
+                1723.6200000000001
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no memoize",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 2026.47,
+              "runs": [
+                2105.1870000000004,
+                2017.4499999999998,
+                2026.47
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no merge join",
+              "plan": "15dae891cd5f0ca0",
+              "same_plan_as_default": true,
+              "ms": 2026.47,
+              "runs": [
+                2105.1870000000004,
+                2017.4499999999998,
+                2026.47
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no nested loop",
+              "plan": "0a6f302f77f31a5c",
+              "ms": 861.278,
+              "runs": [
+                933.9,
+                861.278,
+                797.7950000000001
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "3ca09a83643ffea1",
+              "ms": 1449.084,
+              "runs": [
+                1634.454,
+                1446.354,
+                1449.084
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "34393b0133e092aa",
+              "ms": 3122.259,
+              "runs": [
+                3251.1059999999998,
+                2921.905,
+                3122.259
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "45608c3db976082c",
+              "ms": 1999.653,
+              "runs": [
+                1999.653,
+                1945.186,
+                2025.684
+              ],
+              "rows": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "6c73a7a66e08d880",
+      "query_id": "-9097911544248139864",
+      "normalized": "select id , created_at from lqo_demo . customers where attrs ->> ? = ? order by created_at limit ?",
+      "calls": 3,
+      "logged_ms": 109.669602,
+      "example": "SELECT id, created_at\n  FROM lqo_demo.customers\n WHERE attrs->>'channel' = 'partner'\n ORDER BY created_at\n LIMIT 100",
+      "verdict": "keep",
+      "reason": "no other plan was clearly faster",
+      "baseline_ms": 0.366,
+      "distinct_plans": 2,
+      "notes": [
+        "pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with"
+      ],
+      "samples": [
+        {
+          "text": "SELECT id, created_at\n  FROM lqo_demo.customers\n WHERE attrs->>'channel' = 'partner'\n ORDER BY created_at\n LIMIT 100",
+          "baseline_ms": 0.119,
+          "baseline_runs": [
+            0.149,
+            0.11399999999999999,
+            0.119
+          ],
+          "rows": 100,
+          "baseline_plan": [
+            "Index Scan on customers"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "join order as written",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "merge join only",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "nested loop only",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no hash join",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no index scan",
+              "plan": "1897679b304a519b",
+              "ms": 29.168,
+              "runs": [
+                33.071999999999996,
+                29.168,
+                26.025000000000002
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no memoize",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no merge join",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.119,
+              "runs": [
+                0.149,
+                0.11399999999999999,
+                0.119
+              ],
+              "rows": 100
+            }
+          ]
+        },
+        {
+          "text": "SELECT id, created_at\n  FROM lqo_demo.customers\n WHERE attrs->>'channel' = 'web'\n ORDER BY created_at\n LIMIT 100",
+          "baseline_ms": 0.111,
+          "baseline_runs": [
+            0.111,
+            0.065,
+            0.119
+          ],
+          "rows": 100,
+          "baseline_plan": [
+            "Index Scan on customers"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "join order as written",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "merge join only",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "nested loop only",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no hash join",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no index scan",
+              "plan": "1897679b304a519b",
+              "ms": 25.427999999999997,
+              "runs": [
+                25.427999999999997,
+                25.24,
+                28.542
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no memoize",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no merge join",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.111,
+              "runs": [
+                0.111,
+                0.065,
+                0.119
+              ],
+              "rows": 100
+            }
+          ]
+        },
+        {
+          "text": "SELECT id, created_at\n  FROM lqo_demo.customers\n WHERE attrs->>'tier' = 'gold'\n ORDER BY created_at\n LIMIT 100",
+          "baseline_ms": 0.136,
+          "baseline_runs": [
+            0.168,
+            0.136,
+            0.125
+          ],
+          "rows": 100,
+          "baseline_plan": [
+            "Index Scan on customers"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "join order as written",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "merge join only",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "nested loop only",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no hash join",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no index scan",
+              "plan": "1897679b304a519b",
+              "ms": 32.614,
+              "runs": [
+                32.97,
+                30.168000000000003,
+                32.614
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no memoize",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no merge join",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "3575f6f86ba93ac4",
+              "same_plan_as_default": true,
+              "ms": 0.136,
+              "runs": [
+                0.168,
+                0.136,
+                0.125
+              ],
+              "rows": 100
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "24eb83c21651051b",
+      "query_id": "-5408953375639034531",
+      "normalized": "select id from lqo_demo . customers where attrs ->> ? = ? order by created_at desc limit ?",
+      "calls": 6,
+      "logged_ms": 84.397606,
+      "example": "SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' = 'partner' ORDER BY created_at DESC LIMIT 100",
+      "verdict": "keep",
+      "reason": "no other plan was clearly faster",
+      "baseline_ms": 0.481,
+      "distinct_plans": 2,
+      "notes": [
+        "pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with"
+      ],
+      "samples": [
+        {
+          "text": "SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' = 'partner' ORDER BY created_at DESC LIMIT 100",
+          "baseline_ms": 0.14100000000000001,
+          "baseline_runs": [
+            0.14100000000000001,
+            0.134,
+            0.219
+          ],
+          "rows": 100,
+          "baseline_plan": [
+            "Index Scan on customers"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "join order as written",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "merge join only",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "nested loop only",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no hash join",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no index scan",
+              "plan": "1897679b304a519b",
+              "ms": 34.586,
+              "runs": [
+                33.874,
+                34.586,
+                44.628
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no memoize",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no merge join",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.14100000000000001,
+              "runs": [
+                0.14100000000000001,
+                0.134,
+                0.219
+              ],
+              "rows": 100
+            }
+          ]
+        },
+        {
+          "text": "SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' = 'web' ORDER BY created_at DESC LIMIT 100",
+          "baseline_ms": 0.18,
+          "baseline_runs": [
+            0.18,
+            0.15200000000000002,
+            0.20400000000000001
+          ],
+          "rows": 100,
+          "baseline_plan": [
+            "Index Scan on customers"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "join order as written",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "merge join only",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "nested loop only",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no hash join",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no index scan",
+              "plan": "1897679b304a519b",
+              "ms": 38.336,
+              "runs": [
+                42.967999999999996,
+                35.123,
+                38.336
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no memoize",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no merge join",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.18,
+              "runs": [
+                0.18,
+                0.15200000000000002,
+                0.20400000000000001
+              ],
+              "rows": 100
+            }
+          ]
+        },
+        {
+          "text": "SELECT id FROM lqo_demo.customers WHERE attrs->>'tier' = 'gold' ORDER BY created_at DESC LIMIT 100",
+          "baseline_ms": 0.16,
+          "baseline_runs": [
+            0.16,
+            0.16599999999999998,
+            0.135
+          ],
+          "rows": 100,
+          "baseline_plan": [
+            "Index Scan on customers"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "join order as written",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "merge join only",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "nested loop only",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no hash join",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no index scan",
+              "plan": "1897679b304a519b",
+              "ms": 33.43,
+              "runs": [
+                34.338,
+                33.11,
+                33.43
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no memoize",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no merge join",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "302faf69b079e30e",
+              "same_plan_as_default": true,
+              "ms": 0.16,
+              "runs": [
+                0.16,
+                0.16599999999999998,
+                0.135
+              ],
+              "rows": 100
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "b690ee77412e9728",
+      "query_id": "-1846490321310548495",
+      "normalized": "select region , count ( * ) from lqo_demo . customers group by region order by region",
+      "calls": 3,
+      "logged_ms": 52.799364,
+      "example": "SELECT region, count(*) FROM lqo_demo.customers GROUP BY region ORDER BY region",
+      "verdict": "keep",
+      "reason": "no other plan was clearly faster",
+      "baseline_ms": 26.396,
+      "distinct_plans": 3,
+      "notes": [
+        "pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with"
+      ],
+      "samples": [
+        {
+          "text": "SELECT region, count(*) FROM lqo_demo.customers GROUP BY region ORDER BY region",
+          "baseline_ms": 26.396,
+          "baseline_runs": [
+            26.396,
+            26.251,
+            27.966
+          ],
+          "rows": 100,
+          "baseline_plan": [
+            "Seq Scan on customers"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "1f62b44fe6111b4d",
+              "same_plan_as_default": true,
+              "ms": 26.396,
+              "runs": [
+                26.396,
+                26.251,
+                27.966
+              ],
+              "rows": 100
+            },
+            {
+              "name": "join order as written",
+              "plan": "1f62b44fe6111b4d",
+              "same_plan_as_default": true,
+              "ms": 26.396,
+              "runs": [
+                26.396,
+                26.251,
+                27.966
+              ],
+              "rows": 100
+            },
+            {
+              "name": "merge join only",
+              "plan": "1f62b44fe6111b4d",
+              "same_plan_as_default": true,
+              "ms": 26.396,
+              "runs": [
+                26.396,
+                26.251,
+                27.966
+              ],
+              "rows": 100
+            },
+            {
+              "name": "nested loop only",
+              "plan": "1f62b44fe6111b4d",
+              "same_plan_as_default": true,
+              "ms": 26.396,
+              "runs": [
+                26.396,
+                26.251,
+                27.966
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "1f62b44fe6111b4d",
+              "same_plan_as_default": true,
+              "ms": 26.396,
+              "runs": [
+                26.396,
+                26.251,
+                27.966
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no hash join",
+              "plan": "1f62b44fe6111b4d",
+              "same_plan_as_default": true,
+              "ms": 26.396,
+              "runs": [
+                26.396,
+                26.251,
+                27.966
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no index scan",
+              "plan": "1f62b44fe6111b4d",
+              "same_plan_as_default": true,
+              "ms": 26.396,
+              "runs": [
+                26.396,
+                26.251,
+                27.966
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no memoize",
+              "plan": "1f62b44fe6111b4d",
+              "same_plan_as_default": true,
+              "ms": 26.396,
+              "runs": [
+                26.396,
+                26.251,
+                27.966
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no merge join",
+              "plan": "1f62b44fe6111b4d",
+              "same_plan_as_default": true,
+              "ms": 26.396,
+              "runs": [
+                26.396,
+                26.251,
+                27.966
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop",
+              "plan": "1f62b44fe6111b4d",
+              "same_plan_as_default": true,
+              "ms": 26.396,
+              "runs": [
+                26.396,
+                26.251,
+                27.966
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "1a63f845b82e5a2a",
+              "ms": 77.409,
+              "runs": [
+                73.239,
+                77.784,
+                77.409
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "ab33c58311903aab",
+              "ms": 24.686999999999998,
+              "runs": [
+                23.047,
+                28.649,
+                24.686999999999998
+              ],
+              "rows": 100
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "1a63f845b82e5a2a",
+              "ms": 77.409,
+              "runs": [
+                73.239,
+                77.784,
+                77.409
+              ],
+              "rows": 100
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "5fcb12e39b337776",
+      "query_id": "2220535913826264522",
+      "normalized": "select c . id , count ( * ) , sum ( l . qty ) from lqo_demo . customers c join lqo_demo . orders o on o . customer_id = c . id join lqo_demo . order_lines l on l . order_id = o . id where c . id = ? group by c . id",
+      "calls": 3,
+      "logged_ms": 0.502008,
+      "example": "SELECT c.id, count(*), sum(l.qty)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n WHERE c.id = '100189'\n GROUP BY c.id",
+      "verdict": "keep",
+      "reason": "no other plan was clearly faster",
+      "baseline_ms": 0.793,
+      "distinct_plans": 6,
+      "notes": [
+        "pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with"
+      ],
+      "samples": [
+        {
+          "text": "SELECT c.id, count(*), sum(l.qty)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n WHERE c.id = '100189'\n GROUP BY c.id",
+          "baseline_ms": 0.313,
+          "baseline_runs": [
+            0.255,
+            0.401,
+            0.313
+          ],
+          "rows": 1,
+          "baseline_plan": [
+            "Nested Loop",
+            "Nested Loop",
+            "Index Only Scan on customers",
+            "Bitmap Heap Scan on orders",
+            "Index Scan on order_lines"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "639bacadd732d38d",
+              "timed_out": true
+            },
+            {
+              "name": "join order as written",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.313,
+              "runs": [
+                0.255,
+                0.401,
+                0.313
+              ],
+              "rows": 1
+            },
+            {
+              "name": "merge join only",
+              "plan": "32c13fbaa7e4812a",
+              "timed_out": true
+            },
+            {
+              "name": "nested loop only",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.313,
+              "runs": [
+                0.255,
+                0.401,
+                0.313
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "cf537bac6269c19b",
+              "ms": 0.248,
+              "runs": [
+                0.246,
+                0.365,
+                0.248
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no hash join",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.313,
+              "runs": [
+                0.255,
+                0.401,
+                0.313
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no index scan",
+              "plan": "b9735831aba81e99",
+              "ms": 0.411,
+              "runs": [
+                0.453,
+                0.364,
+                0.411
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no memoize",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.313,
+              "runs": [
+                0.255,
+                0.401,
+                0.313
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no merge join",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.313,
+              "runs": [
+                0.255,
+                0.401,
+                0.313
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no nested loop",
+              "plan": "639bacadd732d38d",
+              "timed_out": true
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "d6adffc1f4d48431",
+              "timed_out": true
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.313,
+              "runs": [
+                0.255,
+                0.401,
+                0.313
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.313,
+              "runs": [
+                0.255,
+                0.401,
+                0.313
+              ],
+              "rows": 1
+            }
+          ]
+        },
+        {
+          "text": "SELECT c.id, count(*), sum(l.qty)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n WHERE c.id = '51808'\n GROUP BY c.id",
+          "baseline_ms": 0.243,
+          "baseline_runs": [
+            0.453,
+            0.21699999999999997,
+            0.243
+          ],
+          "rows": 1,
+          "baseline_plan": [
+            "Nested Loop",
+            "Nested Loop",
+            "Index Only Scan on customers",
+            "Bitmap Heap Scan on orders",
+            "Index Scan on order_lines"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "639bacadd732d38d",
+              "timed_out": true
+            },
+            {
+              "name": "join order as written",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.243,
+              "runs": [
+                0.453,
+                0.21699999999999997,
+                0.243
+              ],
+              "rows": 1
+            },
+            {
+              "name": "merge join only",
+              "plan": "32c13fbaa7e4812a",
+              "timed_out": true
+            },
+            {
+              "name": "nested loop only",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.243,
+              "runs": [
+                0.453,
+                0.21699999999999997,
+                0.243
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "cf537bac6269c19b",
+              "ms": 0.235,
+              "runs": [
+                0.23399999999999999,
+                0.235,
+                0.303
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no hash join",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.243,
+              "runs": [
+                0.453,
+                0.21699999999999997,
+                0.243
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no index scan",
+              "plan": "b9735831aba81e99",
+              "ms": 0.259,
+              "runs": [
+                0.33999999999999997,
+                0.245,
+                0.259
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no memoize",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.243,
+              "runs": [
+                0.453,
+                0.21699999999999997,
+                0.243
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no merge join",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.243,
+              "runs": [
+                0.453,
+                0.21699999999999997,
+                0.243
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no nested loop",
+              "plan": "639bacadd732d38d",
+              "timed_out": true
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "d6adffc1f4d48431",
+              "timed_out": true
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.243,
+              "runs": [
+                0.453,
+                0.21699999999999997,
+                0.243
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.243,
+              "runs": [
+                0.453,
+                0.21699999999999997,
+                0.243
+              ],
+              "rows": 1
+            }
+          ]
+        },
+        {
+          "text": "SELECT c.id, count(*), sum(l.qty)\n  FROM lqo_demo.customers c\n  JOIN lqo_demo.orders o ON o.customer_id = c.id\n  JOIN lqo_demo.order_lines l ON l.order_id = o.id\n WHERE c.id = '100190'\n GROUP BY c.id",
+          "baseline_ms": 0.237,
+          "baseline_runs": [
+            0.355,
+            0.188,
+            0.237
+          ],
+          "rows": 1,
+          "baseline_plan": [
+            "Nested Loop",
+            "Nested Loop",
+            "Index Only Scan on customers",
+            "Bitmap Heap Scan on orders",
+            "Index Scan on order_lines"
+          ],
+          "arms": [
+            {
+              "name": "hash join only",
+              "plan": "639bacadd732d38d",
+              "timed_out": true
+            },
+            {
+              "name": "join order as written",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.237,
+              "runs": [
+                0.355,
+                0.188,
+                0.237
+              ],
+              "rows": 1
+            },
+            {
+              "name": "merge join only",
+              "plan": "32c13fbaa7e4812a",
+              "timed_out": true
+            },
+            {
+              "name": "nested loop only",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.237,
+              "runs": [
+                0.355,
+                0.188,
+                0.237
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no bitmap scan",
+              "plan": "cf537bac6269c19b",
+              "ms": 0.22,
+              "runs": [
+                0.22,
+                0.179,
+                0.231
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no hash join",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.237,
+              "runs": [
+                0.355,
+                0.188,
+                0.237
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no index scan",
+              "plan": "b9735831aba81e99",
+              "ms": 0.391,
+              "runs": [
+                0.391,
+                0.20400000000000001,
+                0.42999999999999994
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no memoize",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.237,
+              "runs": [
+                0.355,
+                0.188,
+                0.237
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no merge join",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.237,
+              "runs": [
+                0.355,
+                0.188,
+                0.237
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no nested loop",
+              "plan": "639bacadd732d38d",
+              "timed_out": true
+            },
+            {
+              "name": "no nested loop, no sequential scan",
+              "plan": "d6adffc1f4d48431",
+              "timed_out": true
+            },
+            {
+              "name": "no parallel workers",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.237,
+              "runs": [
+                0.355,
+                0.188,
+                0.237
+              ],
+              "rows": 1
+            },
+            {
+              "name": "no sequential scan",
+              "plan": "293a76a45af772a1",
+              "same_plan_as_default": true,
+              "ms": 0.237,
+              "runs": [
+                0.355,
+                0.188,
+                0.237
+              ],
+              "rows": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

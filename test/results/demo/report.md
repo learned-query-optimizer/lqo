@@ -3,11 +3,11 @@
 - **Server:** PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1), database lqotest (primary, allowed with --allow-primary)
 - **Workload:** lqo-demo.sql (sql): 8 statements, 6 shapes
 - **Settings:** standard hints (13), 3 timed runs after a warm-up, up to 3 samples per shape, a hint must save 20%; row-count hints off: pg_hint_plan isn't installed or can't be loaded
-- **Estimate:** one pass of the tested statements takes 4,205 ms now, 2,067 ms with these hints (−51%)
+- **Estimate:** one pass of the tested statements takes 4,082 ms now, 1,773 ms with these hints (−57%)
 
-## Faster with a hint (3 of 5 tested)
+## Faster with a hint (2 of 5 tested)
 
-### `ef02bfce` 2,034 ms → 980 ms (−52%)
+### `ef02bfce` 1,996 ms → 845 ms (−58%)
 
 ```sql
 SELECT sum(l.qty * p.price)
@@ -25,7 +25,7 @@ SELECT sum(l.qty * p.price)
 SET LOCAL enable_nestloop = off;
 ```
 
-### `6c73a7a6` 54.0 ms → 31.5 ms (−42%)
+### `6c73a7a6` 31.2 ms → 23.0 ms (−26%)
 
 ```sql
 SELECT id, created_at
@@ -43,25 +43,13 @@ SET LOCAL enable_indexscan = off;
 SET LOCAL enable_indexonlyscan = off;
 ```
 
-### `b690ee77` 30.3 ms → 22.7 ms (−25%)
-
-```sql
-SELECT region, count(*) FROM lqo_demo.customers GROUP BY region ORDER BY region
-```
-
-- **Hint:** no parallel workers, 1 call
-- **Plan:** same joins and scans
-
-```sql
-SET LOCAL max_parallel_workers_per_gather = 0;
-```
-
-## Keep the default plan (2)
+## Keep the default plan (3)
 
 | Shape | Query | Time | Why |
 |---|---|---|---|
-| `24eb83c2` | SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' =… | 26.3 ms | a hint helped one sample but was slower on another |
-| `5fcb12e3` | SELECT c.id, count(*), sum(l.qty) FROM lqo_demo.customers c… | 0.33 ms | no other plan was clearly faster |
+| `24eb83c2` | SELECT id FROM lqo_demo.customers WHERE attrs->>'channel' =… | 15.9 ms | a hint helped one sample but was slower on another |
+| `5fcb12e3` | SELECT c.id, count(*), sum(l.qty) FROM lqo_demo.customers c… | 0.24 ms | no other plan was clearly faster |
+| `b690ee77` | SELECT region, count(*) FROM lqo_demo.customers GROUP BY re… | 27.1 ms | no other plan was clearly faster |
 
 ## Not tested (1)
 
