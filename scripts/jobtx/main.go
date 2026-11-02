@@ -78,12 +78,14 @@ type report struct {
 }
 
 type query struct {
-	Name  string    `json:"name"`
-	Shape string    `json:"shape"`
-	Hint  string    `json:"hint,omitempty"`
-	Off   []float64 `json:"off_ms"`
-	On    []float64 `json:"on_ms"`
-	text  string
+	Name  string `json:"name"`
+	Shape string `json:"shape"`
+	Hint  string `json:"hint,omitempty"`
+	// Hinted counts the calls with hints on that lqo serve hinted.
+	Hinted int       `json:"hinted,omitempty"`
+	Off    []float64 `json:"off_ms"`
+	On     []float64 `json:"on_ms"`
+	text   string
 }
 
 type result struct {
@@ -101,6 +103,8 @@ type result struct {
 	OnMs        float64   `json:"pass_on_ms"`
 	HintedOffMs float64   `json:"hinted_queries_off_ms"`
 	HintedOnMs  float64   `json:"hinted_queries_on_ms"`
+	// Reverted is what lqo serve's guard took back during the run, and why.
+	Reverted map[string]string `json:"reverted,omitempty"`
 }
 
 func main() {
@@ -284,6 +288,7 @@ func run(dsn, bin, reportPath, workload, out string, rounds, port int) error {
 						}
 						if n == 1 {
 							res.HintedCalls++
+							qq.Hinted++
 						} else {
 							fmt.Fprintf(os.Stderr, "%s: lqo serve counts %d hinted calls, want 1\n", qq.Name, n)
 						}
@@ -294,6 +299,9 @@ func run(dsn, bin, reportPath, workload, out string, rounds, port int) error {
 			}
 		}
 		fmt.Fprintf(os.Stderr, "round %d of %d done\n", r+1, rounds)
+	}
+	if res.Reverted, err = reverted(status); err != nil {
+		return err
 	}
 	for _, qq := range qs {
 		off, on := median(qq.Off), median(qq.On)
@@ -345,13 +353,25 @@ func write(dir string, res *result) error {
 	fmt.Fprintf(&w, "- Statements after a hinted query that saw any of its settings: %d\n", res.Leaks)
 	fmt.Fprintf(&w, "- One pass over all %d queries: %.1f s with hints off, %.1f s on (%s)\n", len(res.Queries), res.OffMs/1000, res.OnMs/1000, pct(res.OffMs, res.OnMs))
 	fmt.Fprintf(&w, "- The queries of proven shapes alone: %.1f s off, %.1f s on (%s)\n\n", res.HintedOffMs/1000, res.HintedOnMs/1000, pct(res.HintedOffMs, res.HintedOnMs))
-	fmt.Fprintf(&w, "## Queries with a hint\n\n| Query | Shape | Hint | Off (ms) | On (ms) | Change |\n|---|---|---|---:|---:|---:|\n")
+	if len(res.Reverted) > 0 {
+		fmt.Fprintf(&w, "## Taken back by the guard during the run\n\n")
+		ids := make([]string, 0, len(res.Reverted))
+		for id := range res.Reverted {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			fmt.Fprintf(&w, "- `%s`: %s\n", id[:8], res.Reverted[id])
+		}
+		fmt.Fprintln(&w)
+	}
+	fmt.Fprintf(&w, "## Queries with a hint\n\n| Query | Shape | Hint | Hinted calls | Off (ms) | On (ms) | Change |\n|---|---|---|---:|---:|---:|---:|\n")
 	for _, q := range res.Queries {
 		if q.Hint == "" {
 			continue
 		}
 		off, on := median(q.Off), median(q.On)
-		fmt.Fprintf(&w, "| %s | `%s` | %s | %.1f | %.1f | %s |\n", q.Name, q.Shape[:8], q.Hint, off, on, pct(off, on))
+		fmt.Fprintf(&w, "| %s | `%s` | %s | %d of %d | %.1f | %.1f | %s |\n", q.Name, q.Shape[:8], q.Hint, q.Hinted, len(q.On), off, on, pct(off, on))
 	}
 	return os.WriteFile(filepath.Join(dir, "job-tx.md"), []byte(w.String()), 0o644)
 }
@@ -396,4 +416,29 @@ func hintedCalls(status, id string) (int64, error) {
 		}
 	}
 	return 0, nil
+}
+
+// reverted lists the shapes lqo serve's guard took back, with its reason.
+func reverted(status string) (map[string]string, error) {
+	resp, err := http.Get("http://" + status + "/status")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var st struct {
+		Shapes []struct {
+			ID       string `json:"id"`
+			Reverted string `json:"reverted"`
+		} `json:"shapes"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return nil, err
+	}
+	out := map[string]string{}
+	for _, s := range st.Shapes {
+		if s.Reverted != "" {
+			out[s.ID] = s.Reverted
+		}
+	}
+	return out, nil
 }
