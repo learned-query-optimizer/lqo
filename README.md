@@ -607,7 +607,9 @@ JSON report, the state file and the connection settings.
 - **Fresh plans for statements it has hinted.** A prepared statement LQO has
   hinted in a session keeps getting freshly made plans there, even for calls it
   doesn't hint, so the hinted plans' costs can't move it onto its generic plan.
-  That costs planning time on each of those calls.
+  That costs planning time on each of those calls. With every hint switched off,
+  or while LQO is paused, it sends nothing of its own, so such a statement may
+  then move to its generic plan sooner than it would have without LQO.
 - **A late cancel can abort a transaction.** A cancel request that arrives just
   after a hinted statement in a transaction finished, while LQO sets the
   settings back, aborts that transaction; without LQO it would do nothing.

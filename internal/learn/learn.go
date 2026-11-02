@@ -984,6 +984,7 @@ func (l *Learner) publishLocked() {
 			}
 		}
 	}
+	set.Live = paused == ""
 	l.stats.Paused = paused
 	l.stats.Applied = len(set.Hints)
 	l.col.SetActive(set)

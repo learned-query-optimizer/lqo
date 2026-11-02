@@ -399,11 +399,14 @@ A hinted call of a prepared statement is a custom plan, and PostgreSQL adds its
 cost to the statement's average of custom plans either way. A hint that makes
 plans look costly could then move the statement's later calls without the hint to
 its generic plan. So once LQO has hinted a call of a prepared statement, its later
-calls in that session that don't get the hint (held out, or after the hint was
-switched off or taken back) still get `plan_cache_mode = force_custom_plan` alone,
-the same way. Held-out calls of the extended protocol always do, so the guard
-compares custom plans with custom plans. This stops while active mode is paused
-(replica or state file unavailable).
+calls in that session that don't get the hint (held out, or after the shape was
+switched off or its hint taken back) still get `plan_cache_mode =
+force_custom_plan` alone, the same way. Held-out calls of the extended protocol
+always do, so the guard compares custom plans with custom plans. None of this
+happens with every hint switched off or while active mode is paused (replica or
+state file unavailable): LQO then sends nothing of its own, and a statement
+hinted earlier in a session may move to its generic plan sooner than it would
+have without LQO.
 
 Inside the client's transaction (`T`), the settings must not outlast the
 statement, so there are two statements of LQO's. The first, Save, keeps each

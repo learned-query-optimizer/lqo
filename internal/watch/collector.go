@@ -251,6 +251,9 @@ type ActiveSet struct {
 	Hints   map[string]*Hint
 	Holdout float64
 	Off     bool
+	// Live: active mode, applying hints now (not paused, not switched off).
+	// Only then do statements LQO hinted before get fresh plans.
+	Live bool
 }
 
 // SetActive replaces the hints sessions apply. A shape whose hint is new

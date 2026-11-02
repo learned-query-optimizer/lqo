@@ -105,8 +105,10 @@ func TestReviewHintedCallsSkewPlanCacheChoice(t *testing.T) {
 		r.exec("BEGIN")
 		for i := 0; i < calls; i++ {
 			if i == 5 {
-				// The hint is switched off (or the call is held out).
-				if err := r.l.SwitchAll(true); err != nil {
+				// The shape's hint is switched off (or the call is held
+				// out). With every hint switched off, LQO passes everything
+				// through as it came, and this is a documented limit.
+				if _, err := r.l.SwitchShape(sqltext.Fingerprint(q), true); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -116,6 +118,7 @@ func TestReviewHintedCallsSkewPlanCacheChoice(t *testing.T) {
 			}
 		}
 		r.exec("COMMIT")
+		r.l.SwitchShape(sqltext.Fingerprint(q), false)
 		r.l.SwitchAll(false)
 		return r.simple("SELECT generic_plans || ' ' || custom_plans FROM pg_prepared_statements WHERE name = '" + stmt + "'")
 	}

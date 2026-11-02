@@ -395,7 +395,7 @@ func (s *session) hintExtended(p *pending, ahead []byte) proxy.Action {
 		}
 	}
 	if h == nil {
-		if !p.holdout && !(p.stmt.hinted && s.c.active.Load() != nil) {
+		if set := s.c.active.Load(); !p.holdout && !(p.stmt.hinted && set != nil && set.Live && !set.Off) {
 			return proxy.Action{}
 		}
 		h = plainHint

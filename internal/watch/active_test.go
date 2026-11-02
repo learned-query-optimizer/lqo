@@ -21,7 +21,7 @@ func activeCollector(t *testing.T, holdout float64) *Collector {
 	c := NewCollector()
 	t.Cleanup(c.Close)
 	h := NewHint("no nested loop", []hints.Setting{{Name: "enable_nestloop", Value: "off"}}, "")
-	c.SetActive(&ActiveSet{Hints: map[string]*Hint{"shop/" + c.fingerprint(probe): h}, Holdout: holdout})
+	c.SetActive(&ActiveSet{Hints: map[string]*Hint{"shop/" + c.fingerprint(probe): h}, Holdout: holdout, Live: true})
 	return c
 }
 
@@ -224,9 +224,18 @@ func TestFreshPlansWithoutTheHint(t *testing.T) {
 	if b := call(); !bytes.Equal(b, lqoMsgs(h.SQL)) {
 		t.Fatalf("hinted: %q", b)
 	}
-	c2.SetActive(&ActiveSet{Hints: c2.active.Load().Hints, Off: true})
+	// The shape's hint taken back (or the shape switched off) while LQO
+	// applies others: fresh plans.
+	c2.SetActive(&ActiveSet{Hints: map[string]*Hint{}, Live: true})
 	if b := call(); !bytes.Equal(b, lqoMsgs(plainHint.SQL)) {
-		t.Fatalf("after switching off: %q", b)
+		t.Fatalf("after the hint is taken back: %q", b)
+	}
+	// Every hint switched off, or LQO paused: nothing at all.
+	for _, set := range []*ActiveSet{{Hints: map[string]*Hint{}, Off: true}, {Hints: map[string]*Hint{}}} {
+		c2.SetActive(set)
+		if b := call(); b != nil {
+			t.Fatalf("switched off or paused: %q", b)
+		}
 	}
 	// Another statement, never hinted: nothing.
 	fc(s, 'P', msg("other", probe, int16(0)))
