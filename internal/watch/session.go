@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/learned-query-optimizer/lqo/internal/proxy"
+	"github.com/learned-query-optimizer/lqo/internal/sqltext"
 )
 
 // maxPending caps the requests a session tracks at once. A client that
@@ -56,23 +57,35 @@ type pending struct {
 	holdout   bool // a hint applied to its shape, but not to this call
 	prefixLen int  // characters LQO put in front of a simple query
 
+	// trail: a simple query in the client's transaction, with LQO's
+	// Restore after it, whose replies come after the client's own and are
+	// taken out. clientDone is set at the client's CommandComplete, and
+	// dropping counts the Restore's replies still to take out.
+	trail, clientDone bool
+	dropping          int
+
 	// For pendInject: replies to pass on first (the client's own, sent
 	// before LQO's messages), then the replies to LQO's messages, to drop.
 	pass, expect []byte
 	// For pendInject with a hint comment: the call it's for, which loses
 	// its hinted mark if the reply says pg_hint_plan isn't loaded.
 	check *pending
+	// For pendInject that prepares a statement of LQO's: its SQL, so the
+	// session forgets it if the server skipped the Parse (after an error).
+	parseKey string
 }
 
 // session follows one client connection's requests and replies. The proxy
 // calls FromClient and FromServer from two goroutines.
 //
 // In active mode it also applies proven hints. A hint is applied only to a
-// statement that starts a fresh implicit transaction: the session is idle,
-// nothing else is in flight, and the statement is the whole of what the
-// client sent before its Sync. Its settings are set with set_config(...,
-// true), which is SET LOCAL: they end with that implicit transaction, so
-// they can't reach any other statement.
+// statement sent while the session is idle, with nothing else in flight,
+// that is the whole of what the client sent before its Sync. Its settings
+// are set with set_config(..., true), which is SET LOCAL. Outside a
+// transaction the statement is its own implicit transaction, so they end
+// with it. Inside the client's own transaction (and only a single statement
+// there), LQO saves each setting first and sets it back right after the
+// statement, so the client's later statements don't see the hint either.
 type session struct {
 	c        *Collector
 	db, user string
@@ -83,11 +96,15 @@ type session struct {
 	queue     []*pending
 	describes []string // statement names awaiting ParameterDescription
 	lastDone  time.Time
-	lost      bool   // stopped tracking: too much pipelined
-	txStatus  byte   // from the last ReadyForQuery
-	batch     []byte // the client's messages since the last reply was complete
-	injected  map[string]string
-	rng       *rand.Rand
+	lost      bool              // stopped tracking: too much pipelined
+	txStatus  byte              // from the last ReadyForQuery
+	batch     []byte            // the client's messages since the last reply was complete
+	injected  map[string]string // LQO's prepared statements, by SQL
+	nInjected int
+	// restore is the hint whose settings go back before the client's next
+	// Sync: an extended statement hinted inside its transaction.
+	restore *Hint
+	rng     *rand.Rand
 
 	// shift is how many characters LQO put in front of the text of the
 	// statement being answered, until the next ReadyForQuery, so error
@@ -185,6 +202,11 @@ func (s *session) FromClient(typ byte, body, ahead []byte) proxy.Action {
 			p.hinted, p.holdout = false, false
 		}
 	case 'S':
+		if h := s.restore; h != nil {
+			s.restore = nil
+			before, _ := s.inject(h.Restore, nil, true)
+			act.Before = before
+		}
 		s.push(&pending{kind: pendSync, sent: now})
 	case 'D':
 		if len(body) > 0 && body[0] == 'S' {
@@ -211,12 +233,12 @@ func (s *session) FromClient(typ byte, body, ahead []byte) proxy.Action {
 	return act
 }
 
-// fresh reports whether a statement would start a new implicit
-// transaction of its own: the session is idle, everything sent before has
-// been answered, and the client has sent nothing since but what's in
-// allowed.
+// fresh reports whether a statement can be hinted: the session is idle,
+// outside a transaction or in a transaction that hasn't failed, everything
+// sent before has been answered (so the status is current), and the client
+// has sent nothing since but what's in allowed.
 func (s *session) fresh(allowed string) bool {
-	if s.txStatus != 'I' || len(s.queue) > 0 || s.lost || len(s.batch) > len(allowed) {
+	if (s.txStatus != 'I' && s.txStatus != 'T') || len(s.queue) > 0 || s.lost || len(s.batch) > len(allowed) {
 		return false
 	}
 	return string(s.batch) == allowed[:len(s.batch)] && len(s.batch) == len(allowed)
@@ -248,20 +270,34 @@ func (s *session) hintFor(st *statement, p *pending) *Hint {
 
 // hintSimple puts the hint's settings in front of a simple query, in the
 // same Query message, so they share its implicit transaction.
+//
+// Inside the client's transaction, only for a query that is one statement:
+// LQO's Save goes in front instead, and its Restore after the client's text,
+// on a line of its own so a comment at the end of the text can't swallow it.
 func (s *session) hintSimple(p *pending) proxy.Action {
 	if !s.fresh("") {
+		return proxy.Action{}
+	}
+	inTx := s.txStatus == 'T'
+	if inTx && len(sqltext.Split(p.stmt.text)) != 1 {
 		return proxy.Action{}
 	}
 	h := s.hintFor(p.stmt, p)
 	if h == nil {
 		return proxy.Action{}
 	}
+	set, after := h.SQL, ""
+	if inTx {
+		set, after = h.Save, "\n;\n"+h.Restore
+		p.trail = true
+	}
 	// A hint comment goes first: pg_hint_plan reads it from the start of
 	// the whole query string, and applies it to each statement in it.
-	prefix := h.prefix() + h.SQL + "; "
-	body := make([]byte, 0, len(prefix)+len(p.stmt.text)+1)
+	prefix := h.prefix() + set + "; "
+	body := make([]byte, 0, len(prefix)+len(p.stmt.text)+len(after)+1)
 	body = append(body, prefix...)
 	body = append(body, p.stmt.text...)
+	body = append(body, after...)
 	body = append(body, 0)
 	p.hinted = true
 	p.prefixLen = len(prefix)
@@ -322,7 +358,8 @@ func parseBatch(ahead []byte) bool {
 // between the client's Parse and its Bind, where the plan is made. Only
 // when the client's batch is Parse (optional), Bind, Describe (optional),
 // Execute, Sync, all already sent, so nothing else shares the
-// transaction.
+// transaction, or, in the client's own transaction, nothing else comes
+// before the settings are set back in front of that Sync.
 func (s *session) hintExtended(p *pending, ahead []byte) proxy.Action {
 	parsed := s.fresh("P")
 	if !parsed && !s.fresh("") {
@@ -350,30 +387,75 @@ func (s *session) hintExtended(p *pending, ahead []byte) proxy.Action {
 	if h == nil {
 		return proxy.Action{}
 	}
+	sql := h.SQL
+	inTx := s.txStatus == 'T'
+	if inTx {
+		sql = h.Save
+		s.restore = h
+	}
+	var check *pending
+	if h.Comment != "" {
+		check = p
+	}
+	var pass []byte
+	if parsed {
+		pass = []byte("1") // the client's own ParseComplete comes first
+	}
+	before, _ := s.inject(sql, check, inTx, pass...)
+	p.hinted = true
+	return proxy.Action{Before: before}
+}
+
+// inject runs sql as a statement of LQO's own, prepared once per session,
+// and queues its replies to be taken out. In a transaction its portal is
+// closed after it, since a named portal lasts to the end of the
+// transaction. pass is replies to the client's own messages that come
+// first.
+func (s *session) inject(sql string, check *pending, closePortal bool, pass ...byte) ([]byte, *pending) {
 	if s.injected == nil {
 		s.injected = map[string]string{}
 	}
 	var before []byte
 	expect := []byte("2DC")
-	name, ok := s.injected[h.SQL]
+	inj := &pending{kind: pendInject, check: check, pass: pass}
+	name, ok := s.injected[sql]
 	if !ok {
-		name = "lqo_hint_" + strconv.Itoa(len(s.injected)+1)
-		s.injected[h.SQL] = name
-		before = appendMsg(before, 'P', cstr(name), cstr(h.SQL), []byte{0, 0})
+		s.nInjected++
+		name = "lqo_hint_" + strconv.Itoa(s.nInjected)
+		s.injected[sql] = name
+		before = appendMsg(before, 'P', cstr(name), cstr(sql), []byte{0, 0})
 		expect = []byte("12DC")
+		inj.parseKey = sql
 	}
 	before = appendMsg(before, 'B', cstr("lqo_hint"), cstr(name), []byte{0, 0, 0, 0, 0, 0})
 	before = appendMsg(before, 'E', cstr("lqo_hint"), []byte{0, 0, 0, 0})
-	inj := &pending{kind: pendInject, expect: expect}
-	if h.Comment != "" {
-		inj.check = p
+	if closePortal {
+		before = appendMsg(before, 'C', []byte{'P'}, cstr("lqo_hint"))
+		expect = append(expect, '3')
 	}
-	if parsed {
-		inj.pass = []byte("1") // the client's own ParseComplete comes first
-	}
+	inj.expect = expect
 	s.push(inj)
-	p.hinted = true
-	return proxy.Action{Before: before}
+	return before, inj
+}
+
+// dropFront takes the request at the front of the queue off without
+// reporting it. A statement of LQO's whose Parse the server skipped is
+// forgotten, so it's prepared again next time.
+func (s *session) dropFront() {
+	f := s.queue[0]
+	s.queue = s.queue[1:]
+	if f.kind == pendInject && f.parseKey != "" && len(f.expect) > 0 && f.expect[0] == '1' {
+		delete(s.injected, f.parseKey)
+	}
+}
+
+// firstColumn is the name of a RowDescription's first column.
+func firstColumn(body []byte) string {
+	if len(body) < 2 || binary.BigEndian.Uint16(body) == 0 {
+		return ""
+	}
+	name, _, _ := cstring(body[2:])
+	return name
 }
 
 // wholeBatch reports whether ahead starts with an optional Describe, an
@@ -462,7 +544,7 @@ func (s *session) push(p *pending) {
 
 func (s *session) FromServer(typ byte, body []byte) proxy.Action {
 	switch typ {
-	case 't', 'C', 'I', 's', 'E', 'Z', 'T', 'D', '1', '2', 'N':
+	case 't', 'C', 'I', 's', 'E', 'Z', 'T', 'D', '1', '2', '3', 'N':
 	default:
 		return proxy.Action{} // nothing to note
 	}
@@ -493,11 +575,28 @@ func (s *session) FromServer(typ byte, body []byte) proxy.Action {
 		default:
 			// Something else, such as an error: the server will skip
 			// LQO's messages along with the client's. Stop expecting.
-			s.queue = s.queue[1:]
+			s.dropFront()
+		}
+	}
+	// A Restore after a simple query in the client's transaction: its
+	// replies come after the client's own, before ReadyForQuery.
+	if f := s.front(); f != nil && f.kind == pendSimple && f.trail {
+		switch {
+		case f.dropping > 0 && (typ == 'D' || typ == 'C'):
+			if typ == 'C' {
+				f.dropping = 0
+				f.trail = false
+			}
+			return proxy.Action{Drop: true}
+		case f.clientDone && typ == 'T' && firstColumn(body) == restoreColumn:
+			f.dropping = 1
+			return proxy.Action{Drop: true}
+		case typ == 'C':
+			f.clientDone = true
 		}
 	}
 	switch typ {
-	case 'T', 'D', '1', '2':
+	case 'T', 'D', '1', '2', '3':
 		return proxy.Action{}
 	case 'N':
 		return s.fixPosition(body)
@@ -540,7 +639,7 @@ func (s *session) FromServer(typ byte, body []byte) proxy.Action {
 			s.done(f)
 			// The server skips everything up to the next Sync.
 			for len(s.queue) > 0 && (s.queue[0].kind == pendExec || s.queue[0].kind == pendInject) {
-				s.queue = s.queue[1:]
+				s.dropFront()
 			}
 		}
 		return act
@@ -555,7 +654,7 @@ func (s *session) FromServer(typ byte, body []byte) proxy.Action {
 				s.done(f)
 				break
 			}
-			s.queue = s.queue[1:]
+			s.dropFront()
 			if f.kind == pendSync {
 				s.lastDone = time.Now()
 				break

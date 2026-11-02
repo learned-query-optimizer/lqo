@@ -143,8 +143,8 @@ Design decisions:
 
 Steps:
 1. [ ] upkeep: README link, JOB numbers, workflows
-2. [ ] session.go: in-transaction hints with save and restore; unit tests
-3. [ ] real-server tests: simple and extended in a transaction, savepoints,
+2. [x] session.go: in-transaction hints with save and restore; unit tests
+3. [x] real-server tests: simple and extended in a transaction, savepoints,
        errors and rollback, pipelining, nothing leaks
 4. [ ] JOB replay in transactions (scripts/job.sh, workflow), recorded
 5. [ ] README, docs/REFERENCE.md, independent review, fixes, record-tests.sh

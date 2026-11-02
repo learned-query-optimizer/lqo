@@ -185,19 +185,52 @@ type Hint struct {
 	// it is kept. With a Comment, its last column also says whether
 	// pg_hint_plan is loaded in the session.
 	SQL string
+	// Save is SQL for a statement inside the application's own transaction:
+	// it first keeps each setting's current value in a placeholder setting,
+	// lqo.saved_<name>, then does what SQL does (last column included).
+	// Restore sets each setting back from its placeholder, right after the
+	// statement. Both use set_config(..., true), so the transaction's end
+	// undoes them too. Restore leaves a setting as it is if its placeholder
+	// is missing or empty, so it can never set one to nothing. Its first
+	// column is named lqo_restore, which is how a session knows its reply.
+	Save, Restore string
 }
+
+// restoreColumn names the first column of a Hint's Restore.
+const restoreColumn = "lqo_restore"
 
 // NewHint prepares a hint to apply.
 func NewHint(name string, settings []hints.Setting, comment string) *Hint {
 	parts := make([]string, 0, len(settings)+2)
+	var names []string
+	seen := map[string]bool{}
 	for _, st := range settings {
 		parts = append(parts, "set_config("+quoted(st.Name, 0)+", "+quoted(st.Value, 0)+", true)")
+		if !seen[st.Name] {
+			seen[st.Name] = true
+			names = append(names, st.Name)
+		}
 	}
 	parts = append(parts, "set_config('plan_cache_mode', 'force_custom_plan', true)")
+	if !seen["plan_cache_mode"] {
+		names = append(names, "plan_cache_mode")
+	}
 	if comment != "" {
 		parts = append(parts, "coalesce(current_setting('pg_hint_plan.enable_hint', true), 'off') = 'on'")
 	}
-	return &Hint{Name: name, Settings: settings, Comment: comment, SQL: "SELECT " + strings.Join(parts, ", ")}
+	saves := make([]string, 0, len(names)+len(parts))
+	restores := make([]string, 0, len(names))
+	for _, n := range names {
+		saved := quoted("lqo.saved_"+n, 0)
+		saves = append(saves, "set_config("+saved+", current_setting("+quoted(n, 0)+"), true)")
+		restores = append(restores, "set_config("+quoted(n, 0)+", coalesce(nullif(current_setting("+saved+", true), ''), current_setting("+quoted(n, 0)+")), true)")
+	}
+	restores[0] += " AS " + restoreColumn
+	return &Hint{Name: name, Settings: settings, Comment: comment,
+		SQL:     "SELECT " + strings.Join(parts, ", "),
+		Save:    "SELECT " + strings.Join(append(saves, parts...), ", "),
+		Restore: "SELECT " + strings.Join(restores, ", "),
+	}
 }
 
 // prefix is what goes in front of the query's own text for a hint with a

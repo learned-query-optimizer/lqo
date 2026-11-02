@@ -131,17 +131,19 @@ func TestActiveHintIsAppliedAndNeverLeaks(t *testing.T) {
 			t.Errorf("plan_cache_mode leaked: %s", v)
 		}
 	}
-	// Inside the application's own transaction, nothing is applied: a
-	// SET LOCAL there would last to the end of that transaction.
+	// Inside the application's own transaction it's applied too, and set
+	// back right after the statement (tx_test.go has the rest).
 	ctx := context.Background()
 	if _, err := r.app.Exec(ctx, "BEGIN"); err != nil {
 		t.Fatal(err)
 	}
-	if v := r.simple(probe); v != "on" {
-		t.Error("a hint was applied inside the application's transaction")
-	}
-	if v := r.extended(probe); v != "on" {
-		t.Error("a hint was applied inside the application's transaction (extended)")
+	for _, run := range []func(string) string{r.simple, r.extended} {
+		if v := run(probe); v != "off" {
+			t.Error("not applied inside the application's transaction")
+		}
+		if v := run("SHOW enable_nestloop"); v != "on" {
+			t.Errorf("the hint leaked inside the transaction: %s", v)
+		}
 	}
 	r.app.Exec(ctx, "COMMIT")
 	// Errors still point at the right place in the application's text.
@@ -395,6 +397,21 @@ func TestJoinHintCommentIsApplied(t *testing.T) {
 			t.Errorf("extended=%v: the comment wasn't applied: %q", ext, v)
 		}
 	}
+	// And inside the application's transaction, with nothing left after.
+	if _, err := hp.Exec(ctx, "BEGIN"); err != nil {
+		t.Fatal(err)
+	}
+	for _, ext := range []bool{false, true} {
+		if v := top(hp, ext); !strings.Contains(v, "Merge Join") {
+			t.Errorf("extended=%v, in a transaction: the comment wasn't applied: %q", ext, v)
+		}
+		if v, _ := hp.QueryValue(ctx, "SHOW plan_cache_mode"); v != "auto" {
+			t.Errorf("extended=%v, in a transaction: plan_cache_mode %q after", ext, v)
+		}
+	}
+	if _, err := hp.Exec(ctx, "COMMIT"); err != nil {
+		t.Fatal(err)
+	}
 	// Without pg_hint_plan in the session, the comment does nothing, and
 	// LQO notices and stops putting it in. Switched off for the session,
 	// whether or not the server preloads it.
@@ -412,8 +429,8 @@ func TestJoinHintCommentIsApplied(t *testing.T) {
 	}
 	r.col.Flush()
 	sh, _ := r.col.Get(key)
-	if sh.HintedCalls != 2 {
-		t.Errorf("hinted calls %d, want the 2 with pg_hint_plan", sh.HintedCalls)
+	if sh.HintedCalls != 4 {
+		t.Errorf("hinted calls %d, want the 4 with pg_hint_plan", sh.HintedCalls)
 	}
 	if n := r.col.Stats().NoHintPlan; n != 1 {
 		t.Errorf("calls without pg_hint_plan noticed: %d, want 1 (then it stops trying)", n)

@@ -53,15 +53,154 @@ func TestHintSimpleQuery(t *testing.T) {
 			t.Errorf("the client's %c was dropped", typ)
 		}
 	}
-	// Other shapes, and the same shape inside the client's own
-	// transaction, are left alone.
+	// Other shapes are left alone.
 	if a := fc(s, 'Q', msg("SELECT 1")); a.Body != nil {
 		t.Error("an unhinted shape was rewritten")
 	}
 	s.FromServer('C', msg("SELECT 1"))
 	s.FromServer('Z', []byte{'T'})
+	// Inside the client's transaction: saved, set, and set back after.
+	act = fc(s, 'Q', msg(probe))
+	h := c.active.Load().Hints["shop/"+c.fingerprint(probe)]
+	if want := h.Save + "; " + probe + "\n;\n" + h.Restore + "\x00"; string(act.Body) != want {
+		t.Fatalf("in a transaction:\n%q\nwant\n%q", act.Body, want)
+	}
+	for _, typ := range []byte("TDC") {
+		if a := s.FromServer(typ, nil); !a.Drop {
+			t.Errorf("Save's %c was passed on", typ)
+		}
+	}
+	// The client's own replies, even a column called lqo_restore before
+	// its CommandComplete, then the Restore's, taken out.
+	for _, typ := range []byte("TDC") {
+		body := []byte(nil)
+		if typ == 'T' {
+			body = rowDesc(restoreColumn)
+		}
+		if a := s.FromServer(typ, body); a.Drop {
+			t.Errorf("the client's %c was dropped", typ)
+		}
+	}
+	for _, typ := range []byte("TDC") {
+		body := []byte(nil)
+		if typ == 'T' {
+			body = rowDesc(restoreColumn)
+		}
+		if a := s.FromServer(typ, body); !a.Drop {
+			t.Errorf("Restore's %c was passed on", typ)
+		}
+	}
+	if a := s.FromServer('Z', []byte{'T'}); a.Drop {
+		t.Error("ReadyForQuery dropped")
+	}
+	// Two statements in one query, in a transaction: left alone.
+	if a := fc(s, 'Q', msg(probe+"; COMMIT")); a.Body != nil {
+		t.Error("a query of two statements was rewritten in a transaction")
+	}
+	s.FromServer('C', nil)
+	s.FromServer('C', nil)
+	s.FromServer('Z', []byte{'I'})
+	// A failed transaction: left alone.
+	s.FromServer('Z', []byte{'E'})
 	if a := fc(s, 'Q', msg(probe)); a.Body != nil {
-		t.Error("a query inside the client's transaction was rewritten")
+		t.Error("a query in a failed transaction was rewritten")
+	}
+}
+
+func rowDesc(names ...string) []byte {
+	b := binary.BigEndian.AppendUint16(nil, uint16(len(names)))
+	for _, n := range names {
+		b = append(b, n...)
+		b = append(b, 0)
+		b = append(b, make([]byte, 18)...)
+	}
+	return b
+}
+
+// In the client's transaction, an extended statement gets Save before its
+// Bind and Restore before its Sync, each with its portal closed; LQO's
+// replies are taken out and the client's are passed on.
+func TestHintExtendedInTransaction(t *testing.T) {
+	c := activeCollector(t, 0)
+	s := c.Open(map[string]string{"user": "app", "database": "shop"})
+	s.FromServer('Z', []byte{'T'})
+	h := c.active.Load().Hints["shop/"+c.fingerprint(probe)]
+	ahead := append(framed('E', msg("", int32(0))), framed('S', nil)...)
+	fc(s, 'P', msg("", probe, int16(0)))
+	act := s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
+	if !bytes.Contains(act.Before, []byte(h.Save)) || !bytes.Contains(act.Before, framed('C', []byte("Plqo_hint\x00"))) {
+		t.Fatalf("before the Bind: %q", act.Before)
+	}
+	fc(s, 'E', msg("", int32(0)))
+	act = fc(s, 'S', nil)
+	if !bytes.Contains(act.Before, []byte(h.Restore)) || !bytes.HasSuffix(act.Before, framed('C', []byte("Plqo_hint\x00"))) {
+		t.Fatalf("before the Sync: %q", act.Before)
+	}
+	// Replies: the client's ParseComplete, LQO's 1 2 D C 3, the client's
+	// 2 D C, LQO's 1 2 D C 3, ReadyForQuery.
+	steps := []struct {
+		typ  byte
+		drop bool
+	}{{'1', false}, {'1', true}, {'2', true}, {'D', true}, {'C', true}, {'3', true},
+		{'2', false}, {'D', false}, {'C', false},
+		{'1', true}, {'2', true}, {'D', true}, {'C', true}, {'3', true}, {'Z', false}}
+	for i, st := range steps {
+		body := []byte(nil)
+		if st.typ == 'Z' {
+			body = []byte{'T'}
+		}
+		if a := s.FromServer(st.typ, body); a.Drop != st.drop {
+			t.Fatalf("reply %d (%c): drop %v, want %v", i, st.typ, a.Drop, st.drop)
+		}
+	}
+	// The next call reuses both prepared statements: no Parse.
+	fc(s, 'P', msg("", probe, int16(0)))
+	act = s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
+	if bytes.Contains(act.Before, []byte(h.Save)) || act.Before[0] != 'B' {
+		t.Fatalf("prepared again: %q", act.Before)
+	}
+	fc(s, 'E', msg("", int32(0)))
+	act = fc(s, 'S', nil)
+	if act.Before[0] != 'B' {
+		t.Fatalf("Restore prepared again: %q", act.Before)
+	}
+	// The client's statement fails: the server skips the rest up to the
+	// Sync, Restore included.
+	s.FromServer('1', nil)
+	s.FromServer('2', nil)
+	s.FromServer('D', nil)
+	s.FromServer('C', nil)
+	s.FromServer('3', nil)
+	if a := s.FromServer('E', nil); a.Drop {
+		t.Fatal("the client's error was dropped")
+	}
+	if a := s.FromServer('Z', []byte{'E'}); a.Drop {
+		t.Fatal("ReadyForQuery dropped")
+	}
+	if len(s.(*session).queue) != 0 {
+		t.Errorf("queue left: %d", len(s.(*session).queue))
+	}
+}
+
+// A statement of LQO's whose Parse the server skipped, after an error in
+// the client's own Parse, is prepared again next time.
+func TestSkippedParseIsPreparedAgain(t *testing.T) {
+	c := activeCollector(t, 0)
+	s := c.Open(map[string]string{"user": "app", "database": "shop"})
+	ahead := append(framed('E', msg("", int32(0))), framed('S', nil)...)
+	fc(s, 'P', msg("", probe, int16(0)))
+	act := s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
+	if act.Before[0] != 'P' {
+		t.Fatalf("%q", act.Before)
+	}
+	fc(s, 'E', msg("", int32(0)))
+	fc(s, 'S', nil)
+	s.FromServer('E', nil) // the client's Parse failed
+	s.FromServer('Z', []byte{'I'})
+	fc(s, 'P', msg("", probe, int16(0)))
+	act = s.FromClient('B', msg("", "", int16(0), int16(0), int16(0)), ahead)
+	if act.Before[0] != 'P' {
+		t.Fatalf("not prepared again: %q", act.Before)
 	}
 }
 

@@ -746,3 +746,23 @@ func DialServer(ctx context.Context, cfg *Config) (net.Conn, bool, error) {
 	}
 	return nc, c.usedTLS, nil
 }
+
+// SendRaw writes protocol messages as they are, for tests that drive the
+// protocol by hand, such as pipelines. The caller reads every reply with
+// ReceiveRaw before using the connection's other methods again.
+func (c *Conn) SendRaw(b []byte) error {
+	if _, err := c.netConn.Write(b); err != nil {
+		c.broken = true
+		return err
+	}
+	return nil
+}
+
+// ReceiveRaw reads one message from the server, as it is.
+func (c *Conn) ReceiveRaw() (byte, []byte, error) {
+	typ, body, err := c.readMsg()
+	if err == nil && typ == 'Z' && len(body) > 0 {
+		c.txStatus = body[0]
+	}
+	return typ, body, err
+}

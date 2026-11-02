@@ -275,12 +275,22 @@ func TestServeActiveWithSwitchesAndPgbench(t *testing.T) {
 			t.Fatalf("pgbench -M %s through active LQO: %v\n%s", mode, err, out)
 		}
 	}
+	// And inside transactions, as ORMs send them: the statement after the
+	// hinted one fails (division by zero) if it sees anything of the hint.
+	tx := "BEGIN;\n" + probe + ";\nSELECT (current_setting('enable_nestloop') = 'on' AND current_setting('plan_cache_mode') = 'auto')::int AS ok \\gset\nSELECT 1 / :ok;\nEND;\n"
+	os.WriteFile(script, []byte(tx), 0o600)
+	for _, mode := range []string{"simple", "extended", "prepared"} {
+		out, err := exec.Command(bin, "-n", "-c", "4", "-t", "100", "-M", mode, "-f", script, r.via(dsn)).CombinedOutput()
+		if err != nil || !strings.Contains(string(out), "processed: 400/400") {
+			t.Fatalf("pgbench -M %s, in transactions, through active LQO: %v\n%s", mode, err, out)
+		}
+	}
 	st := r.statusJSON(t)
 	hinted := int64(0)
 	for _, s := range st.Shapes {
 		hinted += s.HintedCalls
 	}
-	if st.Mode != "active" || hinted < 1200 {
+	if st.Mode != "active" || hinted < 2400 {
 		t.Errorf("mode %s, %d hinted calls", st.Mode, hinted)
 	}
 	if get() != "off" {
