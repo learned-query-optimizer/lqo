@@ -56,6 +56,15 @@ session that pg_hint_plan is loaded. The local test server preloads pg_hint_plan
 postgresql-server-dev-16); the `pg-hint-plan` CI job and the JOB workflow
 install it from apt. The JOB run with it writes to `test/results/job-join-hints/`.
 
+v0.6.0 applies hints inside application transactions (November 2026): save each
+setting into a session placeholder, set the hint for one statement, put it back
+after, all SET LOCAL in the same round trip. v0.7.0 adds `lqo advise --stats`
+(November 2026): the workload from pg_stat_statements (`internal/stats`), each
+`$n` filled from sampled rows of the compared table (`sqltext.ParamUses`).
+Hints proven from the view hold for the sampled values: on JOB, 12 of its 27
+also saved 20%+ on the benchmark's own values and 8 were slower
+(`test/results/job-stats/`).
+
 The code is Go with no dependencies: `internal/pgwire` is LQO's own small
 PostgreSQL client (simple query protocol, trust/md5/SCRAM, TLS), because pgx and
 golang.org/x modules can't be fetched from a cloud session. Keep it
@@ -93,11 +102,12 @@ contact, quick start, download, reference. Posts: the launch, what a learned que
 optimizer is, how LQO was tested, the name, the Join Order Benchmark results, lqo
 serve in shadow mode (0.2) and active mode (0.3), four case studies tagged "case
 studies", built from the recorded runs with no customers, shared learning (0.4)
-and row-count hints (0.5) (October 2026). Posts about a past release keep that
+and row-count hints (0.5) (October 2026), hints inside transactions (0.6) and
+advice from pg_stat_statements (0.7) (November 2026). Posts about a past release keep that
 release's numbers and link to its tag's results (0.2, 0.3 with the case
 studies, 0.4); the pages and the other posts follow the latest recording. Images are drawn into static/images.
 
-## In progress: 0.7.0 Phase B, pg_stat_statements as a workload source
+## Done: 0.7.0 Phase B, pg_stat_statements as a workload source (released 2026-11-02)
 
 Approved by the owner on 2026-11-02 ("Go"), item 5 Phase B of softdev-plan.md
 in photozeitgeist/jollyroger.biz.
@@ -160,8 +170,13 @@ Steps:
 4. [x] recorded demo run (scripts/stats-demo.sh, from record-tests.sh: the
        trap gets "no nested loop" from the view as from the file, 4 of 5
        shapes the same; the platinum trap is too rare for the sample)
-4b. [ ] JOB workflow stats run (job.sh JOB_STATS, scripts/compare), started
-       with the release push; README and post numbers after it
+4b. [x] JOB workflow stats run (job.sh JOB_STATS, scripts/compare), run
+       41409126689 on 0.7.0, recorded in ce06cd9: 98 of 110 view entries
+       read, 93 shapes, 27 suggestions (file: 46 of 94), same verdict on 47,
+       same hint on 7. The view's texts use sampled values (a pass 16.6 s
+       against 176.0 s for JOB's literals); of its 27 hints, timed on JOB's
+       texts in the file run, 12 saved 20%+, 7 little, 8 slower. Same run:
+       file 176.0 s -> 66.4 s; replay 159 of 159 hinted, 180.7 s -> 68.5 s
 5. [x] independent review, two rounds (round 1: 7 defects, among them a
        blocker, SQL from a quoted column name run after a COMMIT through a
        "--" comment formed when the expression was written back; round 2: 3,
@@ -171,7 +186,10 @@ Steps:
        unread `WITH lqo_sample AS (SELECT 1)` (PG18's view drops leading
        comments, found by CI). record-tests.sh 2026-11-02: 150 tests passed, 6
        skipped (pg_hint_plan, md5, TLS not set up here; CI has pg_hint_plan)
-6. [ ] release 0.7.0; lqo.net post; softdevstudio note; softdev-plan.md
+6. [x] release 0.7.0 (tag on d95ffe6, release run 41410994034; assets and
+       the downloaded Linux binary checked); README numbers (f94a220);
+       lqo.net post (94b5e6b, Cloudflare green; the 0.6 post's JOB link
+       pinned to fabf26f); softdevstudio note; softdev-plan.md
 
 ## Done: 0.6.0 Phase A, hints inside app transactions (released 2026-11-02)
 
@@ -251,7 +269,7 @@ mode) are done. On October 19 the owner said go for both of these, in this order
 1. **v0.4.0, shared learning.** Done, October 2026.
 2. **v0.5.0, pg_hint_plan.** Done, October 2026.
 
-Both done. 0.6.0 (item 5 Phase A of softdev-plan.md) is done too. Phase B,
-`pg_stat_statements` as a workload source, is in progress (0.7.0, above).
+Both done. Item 5 of softdev-plan.md is done too: Phase A as 0.6.0, Phase B
+as 0.7.0. Nothing further is agreed; ask the owner before starting anything.
 
 Later ideas are decided with the owner before they go here.
