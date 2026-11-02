@@ -97,7 +97,7 @@ and row-count hints (0.5) (October 2026). Posts about a past release keep that
 release's numbers and link to its tag's results (0.2, 0.3 with the case
 studies, 0.4); the pages and the other posts follow the latest recording. Images are drawn into static/images.
 
-## In progress: 0.6.0 Phase A, hints inside app transactions
+## Done: 0.6.0 Phase A, hints inside app transactions (released 2026-11-02)
 
 Approved by the owner on 2026-11-02 ("Go"), item 5 Phase A of softdev-plan.md
 in photozeitgeist/jollyroger.biz. Phase B (`pg_stat_statements` as a workload
@@ -155,12 +155,17 @@ Steps:
 2. [x] session.go: in-transaction hints with save and restore; unit tests
 3. [x] real-server tests: simple and extended in a transaction, savepoints,
        errors and rollback, pipelining, nothing leaks
-4. [ ] JOB replay in transactions (scripts/jobtx, job.sh JOB_TX, workflow), recorded
+4. [x] JOB replay in transactions (scripts/jobtx, job.sh JOB_TX, workflow), recorded
+       (run 41386316126 on 0.6.0 code: advise proved 44 of 94 shapes,
+       152.3 s -> 62.5 s; replay 153 of 153 calls hinted, 0 leaks, a pass
+       152.8 s off -> 63.7 s on, proven shapes 117.6 s -> 28.9 s. Advise and
+       replay must share one data load: ANALYZE samples differ per load)
 5. [x] README, docs/REFERENCE.md, independent review (two rounds), fixes
 5b. [x] record-tests.sh (2026-11-02: 131 tests passed; this sandbox has no
        pg_hint_plan, so the demo report ran without row-count hints; CI's
        pg-hint-plan job covers them)
-6. [ ] release 0.6.0; lqo.net post; softdevstudio note; softdev-plan.md
+6. [x] release 0.6.0 (tag on 6fcb35d; assets and Linux binary checked);
+       lqo.net post; softdevstudio note; softdev-plan.md
 
 ## Next
 
@@ -170,6 +175,7 @@ mode) are done. On October 19 the owner said go for both of these, in this order
 1. **v0.4.0, shared learning.** Done, October 2026.
 2. **v0.5.0, pg_hint_plan.** Done, October 2026.
 
-Both done. Nothing further is agreed.
+Both done. 0.6.0 (item 5 Phase A of softdev-plan.md) is done too. Phase B,
+`pg_stat_statements` as a workload source, waits for the owner's go.
 
 Later ideas are decided with the owner before they go here.

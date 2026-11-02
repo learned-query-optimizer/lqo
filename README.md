@@ -676,11 +676,11 @@ any of the hint.
 over the IMDB data set, runs in the [job workflow](.github/workflows/job.yml) on a
 GitHub runner and records its reports in
 [test/results/job-join-hints/](test/results/job-join-hints/). In the latest run
-(2026-11-02, PostgreSQL 16 with pg_hint_plan, 4 cores, the 13 standard hints and
-row counts; the advisor's code is unchanged since 0.5, so the report says 0.5.0),
-46 of the 94 shapes got a suggestion, 14 of them row counts, and 48 stayed on the
-default plan. The suggestions saved 21% to 99% per shape, median 46%, and one pass
-over every tested query went from 129.7 s to 70.6 s (−46%). The first run, with
+(2026-11-02, lqo 0.6.0, PostgreSQL 16 with pg_hint_plan, 4 cores, the 13 standard
+hints and row counts), 44 of the 94 shapes got a suggestion, 12 of them row counts,
+and 50 stayed on the default plan. The suggestions saved 22% to 99% per shape,
+median 45%, and one pass over every tested query went from 152.3 s to 62.5 s
+(−59%). The first run, with
 the code released as 0.1.0 and without pg_hint_plan, is in
 [test/results/job/](test/results/job/).
 
@@ -689,7 +689,11 @@ the way an ORM sends them, each inside its own `BEGIN` and `COMMIT` with the
 extended protocol, with the hints that run proved
 ([test/results/job-tx/](test/results/job-tx/), `scripts/jobtx`). Each round runs
 every query once with LQO's hints switched off and once on, and the statement
-after each query reads every setting a hint can change.
+after each query reads every setting a hint can change. In the same run, all 153
+calls of the 44 proven shapes made with hints on were hinted, no statement after
+one saw any of its settings, and a pass over the 113 queries took 152.8 s with
+hints off and 63.7 s on (−58%); the proven shapes alone went from 117.6 s to
+28.9 s (−75%).
 
 CI runs every push on Linux against PostgreSQL 14 and 18, and on macOS and Windows.
 Releases are automated: see [RELEASING.md](RELEASING.md).
