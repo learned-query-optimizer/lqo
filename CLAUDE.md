@@ -97,6 +97,64 @@ and row-count hints (0.5) (October 2026). Posts about a past release keep that
 release's numbers and link to its tag's results (0.2, 0.3 with the case
 studies, 0.4); the pages and the other posts follow the latest recording. Images are drawn into static/images.
 
+## In progress: 0.7.0 Phase B, pg_stat_statements as a workload source
+
+Approved by the owner on 2026-11-02 ("Go"), item 5 Phase B of softdev-plan.md
+in photozeitgeist/jollyroger.biz.
+
+What and why: `lqo advise` needs a SQL file or a server log, and on managed
+Postgres the log is often hard to get or doesn't carry durations. Most of those
+servers have pg_stat_statements, which already ranks every query shape by total
+time. Reading it is the easiest way in. Its texts are normalised, with $n in
+place of every value, so LQO has to find values to run them with.
+
+Design decisions:
+- `lqo advise --stats` reads pg_stat_statements on the --dsn server;
+  `--stats-dsn URL` reads it on another (the primary, when trials run on a
+  standby: a standby's view only has the standby's own queries). Workload
+  files become optional with --stats; given both, they're merged.
+- The read: the connected database only, top-level statements (1.9+, PG14),
+  total_exec_time (total_time before 1.8), the 500 entries with the most total
+  time. Kept: what ClassifyTemplate accepts; the rest is counted in the
+  workload line (not reads, hidden by <insufficient privilege>, LQO's own).
+  The extension missing gives one clear error (CREATE EXTENSION, preload).
+- Ranking: a shape's calls and time come from pg_stat_statements when it's
+  there (complete totals), else from the logs, never summed across both.
+- Values for $n, per parameter, from the text around it:
+  - compared with an expression over one table (`a.col = $1`, `$1 < a.col`,
+    `a.attrs->>'tier' = $1`, `IN ($1, $2)`, `= ANY($1)`, LIKE/ILIKE,
+    BETWEEN): rows sampled from that table (TABLESAMPLE SYSTEM sized for
+    about 2000 rows, plain LIMIT for views or when the sample is empty), in a
+    READ ONLY transaction that's rolled back, with a statement timeout.
+    Parameters on the same table come from the same rows, so the values go
+    together as they do in the data; the most frequent combinations first,
+    up to --samples distinct texts. Range comparisons take quantiles of the
+    sample (BETWEEN the 25th and 75th percentile, one-sided the median).
+    Arrays get an untyped '{...}' literal.
+  - LIMIT and FETCH get 100, OFFSET 0.
+  - Anything else (a parameter in the select list, a function argument
+    alone, interval arithmetic): the shape is skipped with the reason.
+  Values are written as untyped quoted literals, so the column's type
+  decides. Texts from a log with the same shape come first; filled ones are
+  marked as such in the report's source.
+- Version 0.7.0. No change to lqo serve.
+- Done when: a recorded run (test/results/stats/) sends the demo workload
+  with the extended protocol, then `lqo advise --stats` with no file proves
+  the same hint for the trap as the SQL file does; and the JOB workflow,
+  with pg_stat_statements loaded, runs the 113 queries once and advises
+  from the view alone, recorded next to the file run of the same job.
+
+Steps:
+1. [ ] workload: pg_stat_statements reader (version-aware), Group merging
+       stats totals; unit tests
+2. [ ] parameter values: comparison finder, aliases, row sampling,
+       quantiles, LIMIT/OFFSET; unit and real-server tests; CI preloads
+       pg_stat_statements
+3. [ ] CLI `--stats`, `--stats-dsn`; README, docs/REFERENCE.md
+4. [ ] recorded demo run; JOB workflow stats run
+5. [ ] independent review, fixes, record-tests.sh
+6. [ ] release 0.7.0; lqo.net post; softdevstudio note; softdev-plan.md
+
 ## Done: 0.6.0 Phase A, hints inside app transactions (released 2026-11-02)
 
 Approved by the owner on 2026-11-02 ("Go"), item 5 Phase A of softdev-plan.md
@@ -176,6 +234,6 @@ mode) are done. On October 19 the owner said go for both of these, in this order
 2. **v0.5.0, pg_hint_plan.** Done, October 2026.
 
 Both done. 0.6.0 (item 5 Phase A of softdev-plan.md) is done too. Phase B,
-`pg_stat_statements` as a workload source, waits for the owner's go.
+`pg_stat_statements` as a workload source, is in progress (0.7.0, above).
 
 Later ideas are decided with the owner before they go here.
