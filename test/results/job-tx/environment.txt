@@ -1,6 +1,6 @@
 # Join Order Benchmark in transactions through lqo serve
-recorded 2026-11-02 05:44 UTC, took 10 minutes
-machine: Linux 7.0.0-1017-azure, AMD EPYC 9V74 80-Core Processor, 4 CPUs, 15 GB memory
+recorded 2026-11-02 09:39 UTC, took 12 minutes
+machine: Linux 7.0.0-1017-azure, INTEL(R) XEON(R) PLATINUM 8573C, 4 CPUs, 15 GB memory
 server: PostgreSQL 16.15 (Ubuntu 16.15-1.pgdg24.04+2) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
 hints: proven by lqo advise in test/results/job-join-hints/job.json
 command: go run ./scripts/jobtx --rounds 3

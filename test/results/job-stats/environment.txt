@@ -1,0 +1,7 @@
+# Join Order Benchmark through pg_stat_statements
+recorded 2026-11-02 11:27 UTC, lqo advise took 104 minutes
+machine: Linux 7.0.0-1017-azure, INTEL(R) XEON(R) PLATINUM 8573C, 4 CPUs, 15 GB memory
+server: PostgreSQL 16.15 (Ubuntu 16.15-1.pgdg24.04+2) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+pg_stat_statements 1.10, after the 113 queries ran once
+compared with: test/results/job-join-hints/job.json, the same data load
+command: lqo advise --allow-primary --stats --top 113 --repeat 3 --samples 10 --hints standard --max-time 120s, stopped after 120m

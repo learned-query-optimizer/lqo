@@ -1,0 +1,247 @@
+LQO advisor report
+
+Server     PostgreSQL 16.15 (Ubuntu 16.15-1.pgdg24.04+2), database imdb (primary, allowed with --allow-primary)
+Workload   pg_stat_statements on the --dsn server (110 entries, 98 reads, 3 not reads, 9 on system catalogs only): 980 statements, 93 shapes
+Settings   standard hints (13), 3 timed runs after a warm-up, up to 10 samples per shape, a hint must save 20%; row-count hints with pg_hint_plan
+
+Faster with a hint: 27 of 93 tested
+
+  1. 7483ed43  SELECT MIN(chn.name) AS character_name, MIN(mi_idx.info) AS rat…  (1 call)
+     64.5 ms → 49.5 ms (−23%) with "no memoize"
+     Plan: same joins and scans
+       SET LOCAL enable_memoize = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  2. 2066cfd6  SELECT MIN(chn.name) AS character_name, MIN(mi_idx.info) AS rat…  (1 call)
+     65.2 ms → 49.6 ms (−24%) with "no memoize"
+     Plan: same joins and scans
+       SET LOCAL enable_memoize = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  3. c213f9bf  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx.info) AS movie_…  (1 call)
+     77.8 ms → 58.2 ms (−25%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  4. 39b4cff4  SELECT MIN(an.name) AS alternative_name, MIN(chn.name) AS voice…  (1 call)
+     745 ms → 224 ms (−70%) with "no parallel workers"
+     Plan: Hash Join, Seq Scan on movie_companies → Nested Loop, Index Scan on movie_companies
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  5. 2b1949c5  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx.info) AS movie_…  (1 call)
+     105 ms → 55.3 ms (−47%) with "no memoize"
+     Plan: same joins and scans
+       SET LOCAL enable_memoize = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  6. 06df28fb  SELECT MIN(cn.name) AS producing_company, MIN(miidx.info) AS ra…  (1 call)
+     103 ms → 17.4 ms (−83%) with "no hash join"
+     Plan: Hash Join ×4, Seq Scan on movie_info_idx, Seq Scan on info_type → Nested Loop ×4, Index Scan on info_type, Bitmap Heap Scan on movie_info_idx
+       SET LOCAL enable_hashjoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  7. 91a61e77  SELECT MIN(mi.info) AS release_date, MIN(miidx.info) AS rating,…  (1 call)
+     99.3 ms → 17.6 ms (−82%) with "no hash join"
+     Plan: Hash Join ×4, Seq Scan on movie_info_idx, Seq Scan on info_type → Nested Loop ×4, Index Scan on info_type, Bitmap Heap Scan on movie_info_idx
+       SET LOCAL enable_hashjoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  8. 850e1a80  SELECT MIN(cn.name) AS from_company, MIN(mc.note) AS production…  (1 call)
+     482 ms → 13.5 ms (−97%) with "no merge join"
+     Plan: Merge Join, Memoize ×2, Index Scan on movie_keyword, Index Scan on company_type, Index Scan on keyword, Index Only Scan on link_type → Nested Loop, Seq Scan on keyword, Bitmap Heap Scan on movie_keyword, Seq Scan on company_type, Seq Scan on link_type
+       SET LOCAL enable_mergejoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  9. 70b0406f  SELECT MIN(chn.name) AS uncredited_voiced_character, MIN(t.titl…  (1 call)
+     393 ms → 178 ms (−55%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  10. 929552c1  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx.info) AS movie_…  (1 call)
+     71.5 ms → 56.3 ms (−21%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  11. 442faf79  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx.info) AS movie_…  (1 call)
+     71.3 ms → 45.9 ms (−36%) with "no parallel workers"
+     Plan: Memoize, Index Scan on info_type ×2 → Seq Scan on info_type ×2
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  12. 6eab06ef  SELECT MIN(chn.name) AS character, MIN(t.title) AS russian_mov_…  (1 call)
+     430 ms → 184 ms (−57%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  13. 376fabaf  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx.info) AS movie_…  (1 call)
+     72.1 ms → 51.9 ms (−28%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  14. 8461866c  SELECT MIN(cn.name) AS from_company, MIN(mc.note) AS production…  (1 call)
+     864 ms → 13.7 ms (−98%) with "no merge join"
+     Plan: Hash Join, Merge Join, Index Scan on movie_keyword, Memoize ×2, Index Scan on keyword, Index Scan on company_type → Nested Loop ×2, Seq Scan on keyword, Bitmap Heap Scan on movie_keyword, Seq Scan on company_type
+       SET LOCAL enable_mergejoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  15. 135e5bc8  SELECT MIN(chn.name) AS character_name, MIN(mi_idx.info) AS rat…  (1 call)
+     65.5 ms → 47.2 ms (−28%) with "no parallel workers"
+     Plan: same joins and scans
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  16. 11d2f26e  SELECT MIN(cn.name) AS company_name, MIN(lt.link) AS link_type,…  (2 calls)
+     201 ms → 15.0 ms (−93%) with "no merge join"
+     Plan: Merge Join, Memoize ×2, Index Scan on movie_keyword, Bitmap Heap Scan on movie_link, Index Scan on keyword, Index Scan on company_type → Nested Loop, Seq Scan on keyword, Bitmap Heap Scan on movie_keyword, Index Scan on movie_link, Seq Scan on company_type
+       SET LOCAL enable_mergejoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  17. 311123fe  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx.info) AS movie_…  (1 call)
+     62.7 ms → 44.3 ms (−29%) with "no parallel workers"
+     Plan: Index Scan on info_type ×2 → Seq Scan on info_type ×2
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  18. 0da43d7b  SELECT MIN(cn1.name) AS first_company, MIN(cn2.name) AS second_…  (1 call)
+     105 ms → 62.3 ms (−41%) with "nested loop only"
+     Plan: Hash Join ×2, Merge Join, Seq Scan on movie_link → Nested Loop ×3, Bitmap Heap Scan on movie_link, Memoize ×2
+       SET LOCAL enable_hashjoin = off;
+       SET LOCAL enable_mergejoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  19. 729ccb90  SELECT MIN(mi.info) AS budget, MIN(t.title) AS unsuccsessful_mo…  (1 call)
+     44.9 ms → 10.7 ms (−76%) with "no parallel workers"
+     Plan: Hash Join, Seq Scan on movie_info_idx → Nested Loop, Bitmap Heap Scan on movie_info_idx
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  20. 0cc52afa  SELECT MIN(cn.name) AS company_name, MIN(lt.link) AS link_type,…  (1 call)
+     84.1 ms → 15.3 ms (−82%) with "no merge join"
+     Plan: Merge Join, Memoize, Index Scan on movie_keyword, Bitmap Heap Scan on movie_link, Index Scan on company_type, Index Scan on keyword → Nested Loop, Seq Scan on keyword, Bitmap Heap Scan on movie_keyword, Index Scan on movie_link, Seq Scan on company_type
+       SET LOCAL enable_mergejoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  21. 6ef26656  SELECT MIN(chn.name) AS voiced_char_name, MIN(n.name) AS voicin…  (1 call)
+     78.2 ms → 51.7 ms (−34%) with "no parallel workers"
+     Plan: Index Scan on role_type, Index Scan on info_type → Seq Scan on info_type, Seq Scan on role_type
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  22. 407c64ff  SELECT MIN(mi.info) AS release_date, MIN(t.title) AS youtube_mo…  (1 call)
+     29.2 ms → 20.7 ms (−29%) with "no parallel workers"
+     Plan: Index Scan on info_type → Seq Scan on info_type
+       SET LOCAL max_parallel_workers_per_gather = 0;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  23. c862384f  SELECT MIN(cn.name) AS producing_company, MIN(lt.link) AS link_…  (1 call)
+     57.2 ms → 38.6 ms (−33%) with "nested loop only"
+     Plan: Hash Join ×3, Merge Join → Nested Loop ×4
+       SET LOCAL enable_hashjoin = off;
+       SET LOCAL enable_mergejoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  24. ddcd52ba  SELECT MIN(cn1.name) AS first_company, MIN(cn2.name) AS second_…  (1 call)
+     82.6 ms → 62.4 ms (−24%) with "nested loop only"
+     Plan: Hash Join ×2, Merge Join, Seq Scan on movie_link, Index Scan on kind_type → Nested Loop ×3, Seq Scan on kind_type, Bitmap Heap Scan on movie_link, Memoize
+       SET LOCAL enable_hashjoin = off;
+       SET LOCAL enable_mergejoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  25. 188e45da  SELECT MIN(cn.name) AS producing_company, MIN(lt.link) AS link_…  (1 call)
+     56.6 ms → 38.0 ms (−33%) with "nested loop only"
+     Plan: Hash Join ×3, Merge Join, Seq Scan on comp_cast_type → Nested Loop ×4, Memoize, Index Scan on comp_cast_type
+       SET LOCAL enable_hashjoin = off;
+       SET LOCAL enable_mergejoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  26. 6744415b  SELECT MIN(cn1.name) AS first_company, MIN(cn2.name) AS second_…  (1 call)
+     75.4 ms → 49.0 ms (−35%) with "nested loop only"
+     Plan: Hash Join ×2, Merge Join → Nested Loop ×3
+       SET LOCAL enable_hashjoin = off;
+       SET LOCAL enable_mergejoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+  27. 4a1dc513  SELECT MIN(cn.name) AS producing_company, MIN(lt.link) AS link_…  (1 call)
+     55.3 ms → 37.3 ms (−33%) with "nested loop only"
+     Plan: Hash Join ×3, Merge Join, Seq Scan on comp_cast_type → Nested Loop ×4, Memoize, Index Scan on comp_cast_type
+       SET LOCAL enable_hashjoin = off;
+       SET LOCAL enable_mergejoin = off;
+     Note: pg_stat_statements keeps no values, so LQO took the values for its parameters from rows of the tables they're compared with
+
+Keep the default plan: 66
+
+  8f30d4e5  SELECT MIN(an.name) AS cool_actor_pseudonym, MI…    11.7 ms  no other plan was clearly faster
+  73f27e86  SELECT MIN(n.name) AS member_in_charnamed_movie…    11.6 ms  no other plan was clearly faster
+  a801be56  SELECT MIN(n.name) AS member_in_charnamed_movie…    10.9 ms  no other plan was clearly faster
+  8cf8918f  SELECT MIN(n.name) AS voicing_actress, MIN(t.ti…     637 ms  a hint helped one sample but was slower on another
+  6d17eb01  SELECT MIN(n.name) AS member_in_charnamed_ameri…    14.8 ms  no other plan was clearly faster
+  85cf65fe  SELECT MIN(n.name) AS member_in_charnamed_movie…    10.5 ms  no other plan was clearly faster
+  534b68fc  SELECT MIN(chn.name) AS character, MIN(t.title)…     720 ms  a hint helped one sample but was slower on another
+  92588c28  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…    50.8 ms  no other plan was clearly faster
+  5671211f  SELECT MIN(a1.name) AS writer_pseudo_name, MIN(…   2,347 ms  a hint helped one sample but was slower on another
+  27998f6b  SELECT MIN(k.keyword) AS movie_keyword, MIN(n.n…    36.3 ms  no other plan was clearly faster
+  3d48869d  SELECT MIN(k.keyword) AS movie_keyword, MIN(n.n…    29.8 ms  no other plan was clearly faster
+  86f7e26b  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…     316 ms  a hint helped one sample but was slower on another
+  2656274c  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…     901 ms  a hint helped one sample but was slower on another
+  b8a77e31  SELECT MIN(n.name) AS cast_member_name, MIN(pi.…    51.5 ms  a hint helped one sample but was slower on another
+  c335bb2c  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…    26.8 ms  no other plan was clearly faster
+  8ed005c6  SELECT MIN(t.title) AS complete_downey_ironman_…    28.9 ms  no other plan was clearly faster
+  dd1b70c1  SELECT MIN(t.title) AS movie_title FROM company…    7.81 ms  no other plan was clearly faster
+  e5a4de69  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…    46.7 ms  no other plan was clearly faster
+  e61f5cbd  SELECT MIN(t.title) AS complete_downey_ironman_…    27.1 ms  no other plan was clearly faster
+  718b520c  SELECT MIN(cn.name) AS producing_company, MIN(m…     140 ms  a hint helped one sample but was slower on another
+  5cce4f36  SELECT MIN(an.name) AS cool_actor_pseudonym, MI…    10.9 ms  no other plan was clearly faster
+  0ea80b8e  SELECT MIN(an.name) AS cool_actor_pseudonym, MI…    12.5 ms  no other plan was clearly faster
+  376e1e8f  SELECT MIN(an1.name) AS actress_pseudonym, MIN(…    57.6 ms  a hint helped one sample but was slower on another
+  fc50c266  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…     123 ms  a hint helped one sample but was slower on another
+  c9d70fe1  SELECT MIN(n.name) AS cast_member, MIN(t.title)…    22.1 ms  no other plan was clearly faster
+  cc66d5be  SELECT MIN(n.name) AS of_person, MIN(t.title) A…    49.9 ms  a hint helped one sample but was slower on another
+  6d1d5dbb  SELECT MIN(kt.kind) AS movie_kind, MIN(t.title)…     100 ms  a hint helped one sample but was slower on another
+  45290f03  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…    55.0 ms  no other plan was clearly faster
+  5798935c  SELECT MIN(at.title) AS aka_title, MIN(t.title)…     233 ms  a hint helped one sample but was slower on another
+  dd477274  SELECT MIN(an.name) AS alternative_name, MIN(ch…     109 ms  a hint helped one sample but was slower on another
+  b26e54ae  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…    79.2 ms  no other plan was clearly faster
+  fa4f3af1  SELECT MIN(n.name) AS voicing_actress, MIN(t.ti…     116 ms  a hint helped one sample but was slower on another
+  4e8b8a70  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…    78.7 ms  no other plan was clearly faster
+  653a69e1  SELECT MIN(t.title) AS movie_title FROM keyword…    7.09 ms  no other plan was clearly faster
+  a05671a4  SELECT MIN(mi.info) AS release_date, MIN(t.titl…     200 ms  a hint helped one sample but was slower on another
+  c56fadd6  SELECT MIN(mi_idx.info) AS rating, MIN(t.title)…    20.1 ms  no other plan was clearly faster
+  e27f8ea2  SELECT MIN(n.name) AS voicing_actress, MIN(t.ti…    95.2 ms  a hint helped one sample but was slower on another
+  4a51ac6c  SELECT MIN(an.name) AS alternative_name, MIN(ch…    60.6 ms  a hint helped one sample but was slower on another
+  ef249dc4  SELECT MIN(mi.info) AS release_date, MIN(t.titl…    71.4 ms  a hint helped one sample but was slower on another
+  2a882a48  SELECT MIN(an.name) AS alternative_name, MIN(ch…    84.1 ms  a hint helped one sample but was slower on another
+  ccc29962  SELECT MIN(mi_idx.info) AS rating, MIN(t.title)…    19.6 ms  no other plan was clearly faster
+  0466dcec  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…    24.9 ms  no other plan was clearly faster
+  bcfea86c  SELECT MIN(mi_idx.info) AS rating, MIN(t.title)…    8.22 ms  no other plan was clearly faster
+  46c94c7f  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…     117 ms  a hint helped one sample but was slower on another
+  e4943b34  SELECT MIN(cn.name) AS movie_company, MIN(mi_id…    78.7 ms  no other plan was clearly faster
+  c936eca9  SELECT MIN(t.title) AS american_movie FROM comp…     101 ms  a hint helped one sample but was slower on another
+  43101882  SELECT MIN(mi.info) AS movie_budget, MIN(mi_idx…     154 ms  a hint helped one sample but was slower on another
+  2ec85d5d  SELECT MIN(n.name) AS voicing_actress, MIN(t.ti…    71.2 ms  a hint helped one sample but was slower on another
+  5d5082e3  SELECT MIN(an.name) AS acress_pseudonym, MIN(t.…    60.8 ms  a hint helped one sample but was slower on another
+  46b42be8  SELECT MIN(n.name) AS of_person, MIN(t.title) A…    46.9 ms  a hint helped one sample but was slower on another
+  8f7394ec  SELECT MIN(t.title) AS typical_european_movie F…    98.2 ms  a hint helped one sample but was slower on another
+  c3f27144  SELECT MIN(t.title) AS american_vhs_movie FROM …    99.0 ms  a hint helped one sample but was slower on another
+  39172b8c  SELECT MIN(chn.name) AS voiced_char_name, MIN(n…    75.1 ms  no other plan was clearly faster
+  3564c7a4  SELECT MIN(lt.link) AS link_type, MIN(t1.title)…    7.23 ms  no other plan was clearly faster
+  631a5812  SELECT MIN(chn.name) AS voiced_char, MIN(n.name…    96.0 ms  no other plan was clearly faster
+  e14ae77f  SELECT MIN(mi_idx.info) AS rating, MIN(t.title)…    15.4 ms  no other plan was clearly faster
+  0cf295d8  SELECT MIN(mc.note) AS production_note, MIN(t.t…     139 ms  a hint helped one sample but was slower on another
+  ae99dc85  SELECT MIN(mc.note) AS production_note, MIN(t.t…     138 ms  a hint helped one sample but was slower on another
+  078dfa3f  SELECT MIN(mc.note) AS production_note, MIN(t.t…     187 ms  a hint helped one sample but was slower on another
+  450fe5f6  SELECT MIN(mc.note) AS production_note, MIN(t.t…     175 ms  a hint helped one sample but was slower on another
+  c3eba7e4  SELECT MIN(cn.name) AS from_company, MIN(lt.lin…    10.2 ms  no other plan was clearly faster
+  3f5cfdf1  SELECT MIN(kt.kind) AS movie_kind, MIN(t.title)…    37.2 ms  no other plan was clearly faster
+  fbf68f9d  SELECT MIN(k.keyword) AS movie_keyword, MIN(n.n…    7.42 ms  no other plan was clearly faster
+  d468dc0f  SELECT MIN(cn.name) AS from_company, MIN(lt.lin…    10.2 ms  no other plan was clearly faster
+  ff8164ee  SELECT MIN(chn.name) AS voiced_char, MIN(n.name…    91.1 ms  no other plan was clearly faster
+  05ae6e9d  SELECT MIN(chn.name) AS voiced_char, MIN(n.name…    91.4 ms  no other plan was clearly faster
+
+Estimated time for one pass of the tested statements: 16,637 ms now, 13,319 ms with these hints (−20%).
+Times are planning plus execution, as EXPLAIN ANALYZE reports them, median of 3 runs per plan.
